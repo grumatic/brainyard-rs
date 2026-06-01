@@ -336,8 +336,32 @@ where
             print!("{}", ask_help());
             true
         }
+        [command, flag] if command == "agents" && is_help_flag(flag) => {
+            print!("{}", agents_help());
+            true
+        }
+        [command, flag] if command == "models" && is_help_flag(flag) => {
+            print!("{}", models_help());
+            true
+        }
         [command, flag] if command == "config" && is_help_flag(flag) => {
             print!("{}", config_help());
+            true
+        }
+        [command, flag] if command == "sessions" && is_help_flag(flag) => {
+            print!("{}", sessions_help());
+            true
+        }
+        [command, subcommand, flag]
+            if command == "sessions" && subcommand == "list" && is_help_flag(flag) =>
+        {
+            print!("{}", sessions_list_help());
+            true
+        }
+        [command, subcommand, flag]
+            if command == "sessions" && subcommand == "prune" && is_help_flag(flag) =>
+        {
+            print!("{}", sessions_prune_help());
             true
         }
         _ => false,
@@ -415,6 +439,33 @@ fn ask_help() -> &'static str {
     )
 }
 
+fn agents_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by agents - List available agents\n",
+        "\n",
+        "USAGE:\n",
+        " by agents [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "   -?, --help\n",
+    )
+}
+
+fn models_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by models - List available LLM models (provider/model)\n",
+        "\n",
+        "USAGE:\n",
+        " by models [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "   -p, --provider S  Filter to a single provider (e.g. anthropic, openai, bedrock)\n",
+        "   -?, --help\n",
+    )
+}
+
 fn config_help() -> &'static str {
     concat!(
         "NAME:\n",
@@ -430,6 +481,56 @@ fn config_help() -> &'static str {
         "       --[no-]re-bootstrap  Force rung re-evaluation even if existing LLM is reachable\n",
         "       --[no-]dry-run       Compute the config but do not write it\n",
         "       --log S              Override bootstrap-log path\n",
+        "   -?, --help\n",
+    )
+}
+
+fn sessions_help() -> String {
+    format!(
+        concat!(
+            "NAME:\n",
+            " by sessions - List or prune persisted agent sessions\n",
+            "\n",
+            "USAGE:\n",
+            " by sessions [global-options] command [command options] [arguments...]\n",
+            "\n",
+            "VERSION:\n",
+            " {}\n",
+            "\n",
+            "COMMANDS:\n",
+            "   list                 List all persisted sessions\n",
+            "   prune                Delete a persisted session\n",
+            "\n",
+            "GLOBAL OPTIONS:\n",
+            "   -?, --help\n",
+        ),
+        env!("BY_BUILD_VERSION")
+    )
+}
+
+fn sessions_list_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by sessions list - List all persisted sessions\n",
+        "\n",
+        "USAGE:\n",
+        " by sessions list [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "   -?, --help\n",
+    )
+}
+
+fn sessions_prune_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by sessions prune - Delete a persisted session\n",
+        "\n",
+        "USAGE:\n",
+        " by sessions prune [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "   -s, --session-id S  Session ID\n",
         "   -?, --help\n",
     )
 }

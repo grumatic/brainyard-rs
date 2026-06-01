@@ -103,10 +103,15 @@ declare -a cases=(
   "top_help|--help"
   "run_help|run --help"
   "ask_help|ask --help"
+  "agents_help|agents --help"
   "agents|agents --fixture fixtures/oracle/registry.json"
+  "models_help|models --help"
   "models|models --fixture fixtures/oracle/registry.json"
   "config_help|config --help"
+  "sessions_help|sessions --help"
+  "sessions_list_help|sessions list --help"
   "sessions_list|sessions list"
+  "sessions_prune_help|sessions prune --help"
 )
 
 json_escape() {

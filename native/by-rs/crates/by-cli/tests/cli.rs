@@ -41,6 +41,22 @@ fn run_help_matches_clojure_command_surface() {
 }
 
 #[test]
+fn agents_help_matches_clojure_command_surface() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["agents", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "NAME:\n by agents - List available agents",
+        ))
+        .stdout(predicate::str::contains(
+            "USAGE:\n by agents [command options] [arguments...]",
+        ))
+        .stdout(predicate::str::contains("--fixture").not());
+}
+
+#[test]
 fn agents_command_reads_registry_fixture() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("registry.json");
@@ -60,6 +76,22 @@ fn agents_command_reads_registry_fixture() {
         .stdout(predicate::str::contains("AGENT"))
         .stdout(predicate::str::contains("coder"))
         .stdout(predicate::str::contains("Writes code"));
+}
+
+#[test]
+fn models_help_matches_clojure_command_surface() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["models", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "NAME:\n by models - List available LLM models (provider/model)",
+        ))
+        .stdout(predicate::str::contains(
+            "-p, --provider S  Filter to a single provider",
+        ))
+        .stdout(predicate::str::contains("--fixture").not());
 }
 
 #[test]
@@ -83,6 +115,57 @@ fn models_command_reads_registry_fixture() {
         .stdout(predicate::str::contains("bedrock"))
         .stdout(predicate::str::contains("amazon.nova-lite-v1:0"))
         .stdout(predicate::str::contains("1 model(s) listed."));
+}
+
+#[test]
+fn sessions_help_matches_clojure_command_surface() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["sessions", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "NAME:\n by sessions - List or prune persisted agent sessions",
+        ))
+        .stdout(predicate::str::contains(
+            "USAGE:\n by sessions [global-options] command [command options] [arguments...]",
+        ))
+        .stdout(predicate::str::contains(
+            "list                 List all persisted sessions",
+        ))
+        .stdout(predicate::str::contains(
+            "prune                Delete a persisted session",
+        ));
+}
+
+#[test]
+fn sessions_list_help_matches_clojure_command_surface() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["sessions", "list", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "NAME:\n by sessions list - List all persisted sessions",
+        ))
+        .stdout(predicate::str::contains(
+            "USAGE:\n by sessions list [command options] [arguments...]",
+        ))
+        .stdout(predicate::str::contains("--root").not());
+}
+
+#[test]
+fn sessions_prune_help_matches_clojure_command_surface() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["sessions", "prune", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "NAME:\n by sessions prune - Delete a persisted session",
+        ))
+        .stdout(predicate::str::contains("-s, --session-id S  Session ID"))
+        .stdout(predicate::str::contains("--root").not());
 }
 
 #[test]
