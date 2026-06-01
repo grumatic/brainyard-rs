@@ -1,3 +1,4 @@
-{:llm {:default-provider :bedrock
+{:agent {:default-agent :coact-agent}
+ :llm {:default-provider :bedrock
        :default-model "amazon.nova-lite-v1:0"
        :available-providers [:bedrock :claude-code]}}

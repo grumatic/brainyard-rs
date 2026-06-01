@@ -10,14 +10,34 @@
 (defn- scalar-name [value]
   (cond
     (nil? value) nil
-    (keyword? value) (name value)
-    (symbol? value) (name value)
+    (keyword? value) (if-let [ns (namespace value)]
+                       (str ns "/" (name value))
+                       (name value))
+    (symbol? value) (if-let [ns (namespace value)]
+                      (str ns "/" (name value))
+                      (name value))
     :else (str value)))
 
 (defn- present-string [value]
   (let [s (scalar-name value)]
     (when-not (str/blank? (or s ""))
       s)))
+
+(defn- json-safe-key [value]
+  (or (present-string value) ""))
+
+(defn- json-safe [value]
+  (cond
+    (nil? value) nil
+    (or (string? value) (number? value) (boolean? value)) value
+    (or (keyword? value) (symbol? value)) (scalar-name value)
+    (map? value) (into (array-map)
+                       (map (fn [[k v]]
+                              [(json-safe-key k) (json-safe v)]))
+                       value)
+    (set? value) (->> value (map json-safe) (sort-by pr-str) vec)
+    (sequential? value) (mapv json-safe value)
+    :else (str value)))
 
 (defn- agent-entry [[id spec]]
   (let [meta (:meta spec)
@@ -42,16 +62,46 @@
     (present-string (:region spec))
     (assoc :region (present-string (:region spec)))))
 
+(defn- tool-entry [[id spec]]
+  (let [meta (:meta spec)
+        tool-id (or (present-string id)
+                    (present-string (:id spec))
+                    (present-string (:id meta)))
+        tool-type (or (:type spec) (:type meta) :tool)]
+    (cond-> (array-map
+             :id tool-id
+             :type (present-string tool-type)
+             :description (or (present-string (:description spec))
+                              (present-string (:description meta))
+                              "")
+             :inputSchema (json-safe (or (:input-schema meta) [:map]))
+             :outputSchema (json-safe (or (:output-schema meta) [:map])))
+      (seq (:aliases meta))
+      (assoc :aliases (json-safe (:aliases meta)))
+      (:tool-use-control meta)
+      (assoc :toolUseControl (json-safe (:tool-use-control meta)))
+      (:agent-tools meta)
+      (assoc :agentTools (json-safe (:agent-tools meta)))
+      (:config-schema meta)
+      (assoc :configSchema (json-safe (:config-schema meta))))))
+
 (defn- registry-document []
-  (array-map
-   :agents (->> (agent/get-tool-defs :type :agent)
-                (map agent-entry)
-                (sort-by :id)
-                vec)
-   :models (->> (clj-llm/get-popular-models)
-                (map model-entry)
-                (sort-by (juxt :provider :id))
-                vec)))
+  (let [tools (->> (agent/get-tool-defs)
+                   (map tool-entry)
+                   (sort-by (juxt :type :id))
+                   vec)
+        agents (->> (agent/get-tool-defs :type :agent)
+                    (map agent-entry)
+                    (sort-by :id)
+                    vec)
+        models (->> (clj-llm/get-popular-models)
+                    (map model-entry)
+                    (sort-by (juxt :provider :id))
+                    vec)]
+    (array-map
+     :tools tools
+     :agents agents
+     :models models)))
 
 (defn- write-json-file! [file value]
   (let [file (io/file file)]
@@ -80,9 +130,16 @@
       (println (usage))
       (let [out-dir (io/file out)]
         (.mkdirs out-dir)
-        (write-json-file! (io/file out-dir "registry.json") (registry-document))
+        (let [registry (registry-document)]
+          (write-json-file! (io/file out-dir "registry.json") registry)
+          (write-json-file! (io/file out-dir "tools.json") (:tools registry))
+          (write-json-file! (io/file out-dir "agents.json") (:agents registry))
+          (write-json-file! (io/file out-dir "models.json") (:models registry)))
         (write-json-file! (io/file out-dir "metadata.json")
                           (array-map :schemaVersion 1
-                                     :exports ["registry.json"]
+                                     :exports ["registry.json"
+                                               "tools.json"
+                                               "agents.json"
+                                               "models.json"]
                                      :source "clojure"))
         (println (str "Wrote Clojure oracle fixtures to " (.getPath out-dir)))))))

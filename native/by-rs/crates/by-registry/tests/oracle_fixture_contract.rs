@@ -1,8 +1,12 @@
-use by_registry::load_registry_path;
+use by_registry::{load_registry_path, load_tools_path};
 
 const ORACLE_REGISTRY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/oracle/registry.json"
+);
+const ORACLE_TOOLS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/oracle/tools.json"
 );
 
 #[test]
@@ -27,5 +31,28 @@ fn clojure_oracle_registry_fixture_is_loadable() {
             .iter()
             .any(|model| model.provider == "bedrock"),
         "oracle fixture should include at least one Bedrock model"
+    );
+    assert!(
+        registry.tools.iter().any(|tool| tool.id == "code$eval"),
+        "oracle fixture should include the code$eval command contract"
+    );
+    assert!(
+        registry
+            .tools
+            .iter()
+            .any(|tool| tool.id == "grep" && tool.tool_type == "tool"),
+        "oracle fixture should include tool entries separately from agents"
+    );
+}
+
+#[test]
+fn standalone_clojure_oracle_tools_fixture_is_loadable() {
+    let tools = load_tools_path(ORACLE_TOOLS).expect("Clojure oracle tools fixture should load");
+
+    assert!(
+        tools.iter().any(|tool| tool.id == "code$eval"
+            && tool.tool_type == "command"
+            && tool.input_schema.is_array()),
+        "tools fixture should preserve command ids, types, and schemas"
     );
 }

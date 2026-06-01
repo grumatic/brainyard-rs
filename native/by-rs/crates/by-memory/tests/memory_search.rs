@@ -1,4 +1,4 @@
-use by_memory::{search_memory, MemoryLayer, MemorySearchRequest};
+use by_memory::{inspect_memory, search_memory, MemoryLayer, MemorySearchRequest};
 use rusqlite::Connection;
 
 #[test]
@@ -48,9 +48,50 @@ fn blank_queries_return_no_hits_without_touching_fts() {
     assert!(hits.is_empty());
 }
 
+#[test]
+fn inspect_reports_schema_version_and_static_table_counts() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("memory.db");
+    let conn = Connection::open(&db_path).expect("sqlite db");
+    create_memory_schema(&conn);
+    seed_memory_rows(&conn);
+    conn.execute(
+        "INSERT OR REPLACE INTO memory_metadata (key, value)
+         VALUES ('schema_version', '2.0.0')",
+        [],
+    )
+    .expect("schema version");
+    conn.execute(
+        "INSERT INTO memory_audit
+         (user_id, session_id, agent_id, turn_id, total_turns, entry_id, layer, byte_cost)
+         VALUES ('u1', 's1', 'coact-agent', 1, 1, 'entry-1', 'l2', 42)",
+        [],
+    )
+    .expect("audit row");
+    drop(conn);
+
+    let report = inspect_memory(&db_path).expect("inspect should read memory db");
+
+    assert_eq!(report.schema_version.as_deref(), Some("2.0.0"));
+    assert!(report.sqlite_user_version >= 0);
+    assert!(!report.journal_mode.is_empty());
+    assert_table(&report.tables, "memory_metadata", true, Some(1));
+    assert_table(&report.tables, "episodes", true, Some(2));
+    assert_table(&report.tables, "episodes_fts", true, Some(2));
+    assert_table(&report.tables, "semantic_facts", true, Some(2));
+    assert_table(&report.tables, "semantic_fts", true, Some(2));
+    assert_table(&report.tables, "memory_audit", true, Some(1));
+}
+
 fn create_memory_schema(conn: &Connection) {
     conn.execute_batch(
         r#"
+        CREATE TABLE memory_metadata (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE episodes (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           session_id TEXT NOT NULL,
@@ -114,9 +155,36 @@ fn create_memory_schema(conn: &Connection) {
           INSERT INTO semantic_fts(rowid, content, fact_type)
           VALUES (new.id, new.content, new.fact_type);
         END;
+
+        CREATE TABLE memory_audit (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id TEXT NOT NULL,
+          session_id TEXT NOT NULL,
+          agent_id TEXT,
+          turn_id INTEGER NOT NULL,
+          total_turns INTEGER,
+          entry_id TEXT NOT NULL,
+          layer TEXT NOT NULL,
+          byte_cost INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
         "#,
     )
     .expect("schema");
+}
+
+fn assert_table(
+    tables: &[by_memory::MemoryTableStats],
+    name: &str,
+    present: bool,
+    rows: Option<i64>,
+) {
+    let table = tables
+        .iter()
+        .find(|table| table.name == name)
+        .unwrap_or_else(|| panic!("missing table stats for {name}"));
+    assert_eq!(table.present, present, "present mismatch for {name}");
+    assert_eq!(table.rows, rows, "row count mismatch for {name}");
 }
 
 fn seed_memory_rows(conn: &Connection) {

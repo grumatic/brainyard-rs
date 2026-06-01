@@ -45,6 +45,21 @@ pub struct MemorySearchHit {
     pub rank: f64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryInspectReport {
+    pub schema_version: Option<String>,
+    pub sqlite_user_version: i64,
+    pub journal_mode: String,
+    pub tables: Vec<MemoryTableStats>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MemoryTableStats {
+    pub name: String,
+    pub present: bool,
+    pub rows: Option<i64>,
+}
+
 pub fn search_memory(
     db_path: impl AsRef<Path>,
     request: MemorySearchRequest,
@@ -65,6 +80,29 @@ pub fn search_memory(
     hits.truncate(request.limit);
 
     Ok(hits)
+}
+
+pub fn inspect_memory(db_path: impl AsRef<Path>) -> Result<MemoryInspectReport> {
+    let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .context("opening memory sqlite database read-only")?;
+    let schema_version = memory_schema_version(&conn)?;
+    let sqlite_user_version = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .context("reading sqlite user_version pragma")?;
+    let journal_mode = conn
+        .pragma_query_value(None, "journal_mode", |row| row.get(0))
+        .context("reading sqlite journal_mode pragma")?;
+    let tables = MEMORY_TABLES
+        .iter()
+        .map(|table| memory_table_stats(&conn, table))
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(MemoryInspectReport {
+        schema_version,
+        sqlite_user_version,
+        journal_mode,
+        tables,
+    })
 }
 
 fn search_episodes(conn: &Connection, query: &str, limit: usize) -> Result<Vec<MemorySearchHit>> {
@@ -148,6 +186,43 @@ fn search_semantic_facts(
         .context("searching semantic facts FTS")
 }
 
+const MEMORY_TABLES: &[&str] = &[
+    "memory_metadata",
+    "episodes",
+    "episodes_fts",
+    "semantic_facts",
+    "semantic_fts",
+    "memory_audit",
+];
+
+fn memory_table_stats(conn: &Connection, table: &str) -> Result<MemoryTableStats> {
+    let present = table_exists(conn, table)?;
+    let rows = if present {
+        Some(count_static_table_rows(conn, table)?)
+    } else {
+        None
+    };
+    Ok(MemoryTableStats {
+        name: table.to_string(),
+        present,
+        rows,
+    })
+}
+
+fn memory_schema_version(conn: &Connection) -> Result<Option<String>> {
+    if !table_exists(conn, "memory_metadata")? {
+        return Ok(None);
+    }
+
+    let mut stmt =
+        conn.prepare("SELECT value FROM memory_metadata WHERE key = 'schema_version'")?;
+    match stmt.query_row([], |row| row.get(0)) {
+        Ok(version) => Ok(Some(version)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err).context("reading memory schema version"),
+    }
+}
+
 fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
@@ -155,6 +230,20 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool> {
         |row| row.get::<_, bool>(0),
     )
     .with_context(|| format!("checking sqlite table {table}"))
+}
+
+fn count_static_table_rows(conn: &Connection, table: &str) -> Result<i64> {
+    let sql = match table {
+        "memory_metadata" => "SELECT COUNT(*) FROM memory_metadata",
+        "episodes" => "SELECT COUNT(*) FROM episodes",
+        "episodes_fts" => "SELECT COUNT(*) FROM episodes_fts",
+        "semantic_facts" => "SELECT COUNT(*) FROM semantic_facts",
+        "semantic_fts" => "SELECT COUNT(*) FROM semantic_fts",
+        "memory_audit" => "SELECT COUNT(*) FROM memory_audit",
+        _ => unreachable!("memory inspect only counts static table names"),
+    };
+    conn.query_row(sql, [], |row| row.get(0))
+        .with_context(|| format!("counting rows in sqlite table {table}"))
 }
 
 fn sqlite_limit(limit: usize) -> i64 {

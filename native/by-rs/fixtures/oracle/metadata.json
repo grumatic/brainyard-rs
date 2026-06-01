@@ -1,1 +1,1 @@
-{"schemaVersion":1,"exports":["registry.json"],"source":"clojure"}
+{"schemaVersion":1,"exports":["registry.json","tools.json","agents.json","models.json"],"source":"clojure"}
