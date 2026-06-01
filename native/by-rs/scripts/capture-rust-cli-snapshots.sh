@@ -107,6 +107,8 @@ declare -a cases=(
   "agents|agents --fixture fixtures/oracle/registry.json"
   "models_help|models --help"
   "models|models --fixture fixtures/oracle/registry.json"
+  "models_bedrock|models --fixture fixtures/oracle/registry.json --provider bedrock"
+  "models_claude_code|models --fixture fixtures/oracle/registry.json --provider claude-code"
   "config_help|config --help"
   "sessions_help|sessions --help"
   "sessions_list_help|sessions list --help"

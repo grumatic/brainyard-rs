@@ -107,6 +107,8 @@ declare -a cases=(
   "agents|agents"
   "models_help|models --help"
   "models|models"
+  "models_bedrock|models --provider bedrock"
+  "models_claude_code|models --provider claude-code"
   "config_help|config --help"
   "sessions_help|sessions --help"
   "sessions_list_help|sessions list --help"
