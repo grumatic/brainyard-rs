@@ -2,23 +2,23 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-out_dir="$repo_root/native/by-rs/fixtures/cli-snapshots/clojure"
-bin_path="${BY_CLOJURE_BIN:-}"
-runner_command="${BY_CLOJURE_RUNNER:-}"
+native_root="$repo_root/native/by-rs"
+out_dir="$native_root/fixtures/cli-snapshots/rust"
+bin_path="${BY_RUST_BIN:-}"
+runner_command="${BY_RUST_RUNNER:-}"
 fixture_home=""
 keep_home=0
 
 usage() {
   cat <<'USAGE'
-Usage: capture-clojure-cli-snapshots [--bin PATH | --runner COMMAND] [--out DIR] [--home DIR] [--keep-home]
+Usage: capture-rust-cli-snapshots [--bin PATH | --runner COMMAND] [--out DIR] [--home DIR] [--keep-home]
 
-Captures read-only Clojure `by` CLI stdout/stderr/exit-code snapshots for the
-Rust native port parity harness. The script uses a temporary HOME unless --home
-is provided, avoiding accidental writes to the developer's real ~/.brainyard.
+Captures read-only Rust `by-rs` CLI stdout/stderr/exit-code snapshots for the
+native port parity harness. The script uses a temporary HOME unless --home is
+provided, avoiding accidental writes to the developer's real ~/.brainyard.
 
-When a native/JVM `by` binary has not been built yet, use --runner "bb tui" to
-capture snapshots through the existing Babashka task. If no binary is found and
-Babashka is available, this script falls back to that runner automatically.
+When `target/debug/by-rs` has not been built yet, the script falls back to
+`cargo run -q -p by-cli --bin by-rs --` if Cargo is available.
 USAGE
 }
 
@@ -69,25 +69,23 @@ fi
 if [[ -z "$bin_path" ]]; then
   if [[ -n "$runner_command" ]]; then
     :
-  elif [[ -x "$repo_root/projects/agent-tui-app/target/by" ]]; then
-    bin_path="$repo_root/projects/agent-tui-app/target/by"
-  elif command -v by >/dev/null 2>&1; then
-    bin_path="$(command -v by)"
-  elif [[ -f "$repo_root/bb.edn" ]] && command -v bb >/dev/null 2>&1; then
-    runner_command="bb tui"
+  elif [[ -x "$native_root/target/debug/by-rs" ]]; then
+    bin_path="$native_root/target/debug/by-rs"
+  elif command -v cargo >/dev/null 2>&1; then
+    runner_command="cargo run -q -p by-cli --bin by-rs --"
   else
-    echo "Could not find Clojure by binary. Pass --bin PATH, --runner COMMAND, or set BY_CLOJURE_BIN/BY_CLOJURE_RUNNER." >&2
+    echo "Could not find Rust by-rs binary. Pass --bin PATH, --runner COMMAND, or set BY_RUST_BIN/BY_RUST_RUNNER." >&2
     exit 2
   fi
 fi
 
 if [[ -n "$bin_path" && ! -x "$bin_path" ]]; then
-  echo "Clojure by binary is not executable: $bin_path" >&2
+  echo "Rust by-rs binary is not executable: $bin_path" >&2
   exit 2
 fi
 
 if [[ -z "$fixture_home" ]]; then
-  fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/by-clojure-cli-home.XXXXXX")"
+  fixture_home="$(mktemp -d "${TMPDIR:-/tmp}/by-rust-cli-home.XXXXXX")"
   if [[ "$keep_home" -eq 0 ]]; then
     trap 'rm -rf "$fixture_home"' EXIT
   fi
@@ -101,8 +99,8 @@ mkdir -p "$project_dir"
 
 declare -a cases=(
   "top_help|--help"
-  "agents|agents"
-  "models|models"
+  "agents|agents --fixture fixtures/oracle/registry.json"
+  "models|models --fixture fixtures/oracle/registry.json"
   "config_help|config --help"
   "sessions_list|sessions list"
 )
@@ -128,7 +126,7 @@ capture_case() {
       command+=" $escaped"
     done
     (
-      cd "$repo_root"
+      cd "$native_root"
       HOME="$fixture_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
@@ -136,7 +134,7 @@ capture_case() {
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   else
     (
-      cd "$repo_root"
+      cd "$native_root"
       HOME="$fixture_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
@@ -156,8 +154,8 @@ done
 
 {
   printf '{\n'
-  printf '  "schemaVersion": 2,\n'
-  printf '  "source": "clojure",\n'
+  printf '  "schemaVersion": 1,\n'
+  printf '  "source": "rust",\n'
   if [[ -n "$bin_path" ]]; then
     printf '  "binary": %s,\n' "$(printf '%s' "$bin_path" | json_escape)"
   else
@@ -168,7 +166,7 @@ done
   else
     printf '  "runner": null,\n'
   fi
-  printf '  "workingDirectory": %s,\n' "$(printf '%s' "$repo_root" | json_escape)"
+  printf '  "workingDirectory": %s,\n' "$(printf '%s' "$native_root" | json_escape)"
   printf '  "isolatedHome": %s,\n' "$(printf '%s' "$fixture_home" | json_escape)"
   printf '  "cases": [\n'
   for i in "${!cases[@]}"; do
@@ -191,4 +189,4 @@ done
 if [[ "$keep_home" -eq 1 ]]; then
   printf 'Kept isolated HOME at %s\n' "$fixture_home"
 fi
-printf 'Wrote Clojure CLI snapshots to %s\n' "$out_dir"
+printf 'Wrote Rust CLI snapshots to %s\n' "$out_dir"
