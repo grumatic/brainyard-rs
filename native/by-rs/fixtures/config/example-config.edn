@@ -1,0 +1,3 @@
+{:llm {:default-provider :bedrock
+       :default-model "amazon.nova-lite-v1:0"
+       :available-providers [:bedrock :claude-code]}}

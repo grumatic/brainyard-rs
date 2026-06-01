@@ -1,0 +1,8 @@
+{
+  "agents": [
+    {"id": "coder", "name": "Coder", "description": "Fixture agent for read-only parity"}
+  ],
+  "models": [
+    {"provider": "bedrock", "id": "amazon.nova-lite-v1:0", "description": "Fixture Bedrock model"}
+  ]
+}

@@ -1,0 +1,12 @@
+[package]
+name = "by-memory"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
