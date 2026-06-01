@@ -3,16 +3,26 @@ use predicates::prelude::*;
 use rusqlite::Connection;
 
 #[test]
-fn help_exposes_read_only_spike_commands() {
+fn top_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .arg("--help")
         .assert()
         .success()
+        .stdout(predicate::str::contains("NAME:\n by - Brainyard Agent CLI"))
+        .stdout(predicate::str::contains(
+            "USAGE:\n by [global-options] command [command options] [arguments...]",
+        ))
+        .stdout(predicate::str::contains("VERSION:"))
+        .stdout(predicate::str::contains(
+            "run                  Start interactive TUI agent session (default)",
+        ))
         .stdout(predicate::str::contains("agents"))
         .stdout(predicate::str::contains("models"))
-        .stdout(predicate::str::contains("tools"))
-        .stdout(predicate::str::contains("sessions"));
+        .stdout(predicate::str::contains("sessions"))
+        .stdout(predicate::str::contains("tools").not())
+        .stdout(predicate::str::contains("memory").not())
+        .stdout(predicate::str::contains("tui").not());
 }
 
 #[test]
@@ -231,13 +241,38 @@ fn tools_command_reads_standalone_tools_fixture_and_filters_by_id() {
 }
 
 #[test]
-fn help_exposes_config_inspection_command() {
+fn config_help_matches_clojure_bootstrap_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
-        .arg("--help")
+        .args(["config", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("config"));
+        .stdout(predicate::str::contains(
+            "NAME:\n by config - Bootstrap pipeline (detect → ladder → handoff)",
+        ))
+        .stdout(predicate::str::contains(
+            "USAGE:\n by config [command options] [arguments...]",
+        ))
+        .stdout(predicate::str::contains("--[no-]auto"))
+        .stdout(predicate::str::contains("--profile S"))
+        .stdout(predicate::str::contains("--[no-]dry-run"))
+        .stdout(predicate::str::contains("show").not());
+}
+
+#[test]
+fn config_bootstrap_projection_stays_read_only() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["config", "--auto", "--profile", "dev", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"operation\": \"config\""))
+        .stdout(predicate::str::contains("\"status\": \"not-implemented\""))
+        .stdout(predicate::str::contains("\"network\": false"))
+        .stdout(predicate::str::contains("\"writes\": false"))
+        .stdout(predicate::str::contains("\"auto\": true"))
+        .stdout(predicate::str::contains("\"profile\": \"dev\""))
+        .stdout(predicate::str::contains("\"dry_run\": true"));
 }
 
 #[test]
@@ -362,13 +397,6 @@ fn ask_dry_run_uses_project_config_defaults_before_user_config() {
 
 #[test]
 fn help_exposes_memory_search_command() {
-    Command::cargo_bin("by-rs")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("memory"));
-
     Command::cargo_bin("by-rs")
         .unwrap()
         .args(["memory", "--help"])

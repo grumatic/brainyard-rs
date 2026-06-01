@@ -8,6 +8,8 @@ bin_path="${BY_RUST_BIN:-}"
 runner_command="${BY_RUST_RUNNER:-}"
 fixture_home=""
 keep_home=0
+cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
 
 usage() {
   cat <<'USAGE'
@@ -128,6 +130,8 @@ capture_case() {
     (
       cd "$native_root"
       HOME="$fixture_home" \
+      CARGO_HOME="$cargo_home" \
+      RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
         bash -lc "$command"
@@ -136,6 +140,8 @@ capture_case() {
     (
       cd "$native_root"
       HOME="$fixture_home" \
+      CARGO_HOME="$cargo_home" \
+      RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
         "$bin_path" "$@"

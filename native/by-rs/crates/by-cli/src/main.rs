@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Parser)]
-#[command(name = "by-rs")]
-#[command(about = "Brainyard Rust companion CLI")]
+#[command(name = "by")]
+#[command(about = "Brainyard Agent CLI")]
 #[command(version = env!("BY_BUILD_VERSION"))]
 struct Cli {
     #[command(subcommand)]
@@ -16,6 +16,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
+    /// Start interactive TUI agent session (default).
+    Run,
     /// Ask a one-shot question. Bedrock supports dry-run shaping or explicit live calls.
     Ask {
         /// Agent ID. Reserved for later full agent execution parity.
@@ -90,7 +92,37 @@ enum Commands {
     /// Inspect Brainyard configuration without mutating it.
     Config {
         #[command(subcommand)]
-        command: ConfigCommand,
+        command: Option<ConfigCommand>,
+        /// Non-interactive mode; apply profile defaults.
+        #[arg(long, action = ArgAction::SetTrue)]
+        auto: bool,
+        /// Disable non-interactive mode.
+        #[arg(long = "no-auto", action = ArgAction::SetTrue, hide = true)]
+        no_auto: bool,
+        /// Named profile (dev, ci, offline, cloud).
+        #[arg(long, value_name = "S")]
+        profile: Option<String>,
+        /// Run phases 1-2 only; skip config-agent prompt.
+        #[arg(long = "skip-handoff", action = ArgAction::SetTrue)]
+        skip_handoff: bool,
+        /// Do not skip config-agent prompt.
+        #[arg(long = "no-skip-handoff", action = ArgAction::SetTrue, hide = true)]
+        no_skip_handoff: bool,
+        /// Force rung re-evaluation even if existing LLM is reachable.
+        #[arg(long = "re-bootstrap", action = ArgAction::SetTrue)]
+        re_bootstrap: bool,
+        /// Do not force rung re-evaluation.
+        #[arg(long = "no-re-bootstrap", action = ArgAction::SetTrue, hide = true)]
+        no_re_bootstrap: bool,
+        /// Compute the config but do not write it.
+        #[arg(long = "dry-run", action = ArgAction::SetTrue)]
+        dry_run: bool,
+        /// Allow writes when bootstrap parity is implemented.
+        #[arg(long = "no-dry-run", action = ArgAction::SetTrue, hide = true)]
+        no_dry_run: bool,
+        /// Override bootstrap-log path.
+        #[arg(long, value_name = "S")]
+        log: Option<PathBuf>,
     },
     /// Search Brainyard memory SQLite stores without mutating them.
     Memory {
@@ -194,8 +226,15 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    if print_compat_help_if_requested(std::env::args().skip(1)) {
+        return Ok(());
+    }
+
     let cli = Cli::parse();
     match cli.command {
+        Commands::Run => {
+            bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
+        }
         Commands::Ask {
             agent: _agent,
             provider,
@@ -228,8 +267,32 @@ fn run() -> Result<()> {
             tool_type,
             id,
         } => print_tools(fixture, tool_type, id),
-        Commands::Config { command } => match command {
-            ConfigCommand::Show { path } => print_config(path),
+        Commands::Config {
+            command,
+            auto,
+            no_auto,
+            profile,
+            skip_handoff,
+            no_skip_handoff,
+            re_bootstrap,
+            no_re_bootstrap,
+            dry_run,
+            no_dry_run,
+            log,
+        } => match command {
+            Some(ConfigCommand::Show { path }) => print_config(path),
+            None => print_config_bootstrap_projection(ConfigBootstrapOptions {
+                auto,
+                no_auto,
+                profile,
+                skip_handoff,
+                no_skip_handoff,
+                re_bootstrap,
+                no_re_bootstrap,
+                dry_run,
+                no_dry_run,
+                log,
+            }),
         },
         Commands::Memory { command } => match command {
             MemoryCommand::Inspect { db } => print_memory_inspect(db),
@@ -252,6 +315,75 @@ fn run() -> Result<()> {
             } => print_tui_snapshot(agent, model, rows, cols),
         },
     }
+}
+
+fn print_compat_help_if_requested<I>(args: I) -> bool
+where
+    I: IntoIterator,
+    I::Item: Into<String>,
+{
+    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    match args.as_slice() {
+        [flag] if is_help_flag(flag) => {
+            print!("{}", top_level_help());
+            true
+        }
+        [command, flag] if command == "config" && is_help_flag(flag) => {
+            print!("{}", config_help());
+            true
+        }
+        _ => false,
+    }
+}
+
+fn is_help_flag(flag: &str) -> bool {
+    matches!(flag, "--help" | "-h" | "-?")
+}
+
+fn top_level_help() -> String {
+    format!(
+        concat!(
+            "NAME:\n",
+            " by - Brainyard Agent CLI\n",
+            "\n",
+            "USAGE:\n",
+            " by [global-options] command [command options] [arguments...]\n",
+            "\n",
+            "VERSION:\n",
+            " {}\n",
+            "\n",
+            "COMMANDS:\n",
+            "   run                  Start interactive TUI agent session (default)\n",
+            "   ask                  Ask a one-shot question (non-interactive)\n",
+            "   agents               List available agents\n",
+            "   models               List available LLM models (provider/model)\n",
+            "   config               Bootstrap pipeline (detect → ladder → handoff)\n",
+            "   sessions             List or prune persisted agent sessions\n",
+            "\n",
+            "GLOBAL OPTIONS:\n",
+            "   -?, --help\n",
+        ),
+        env!("BY_BUILD_VERSION")
+    )
+}
+
+fn config_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by config - Bootstrap pipeline (detect → ladder → handoff)\n",
+        "\n",
+        "USAGE:\n",
+        " by config [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "       --[no-]auto          Non-interactive mode; apply profile defaults\n",
+        "       --profile S          Named profile (dev, ci, offline, cloud)\n",
+        "       --[no-]skip-handoff  Run phases 1-2 only; skip config-agent prompt\n",
+        "       --[no-]re-bootstrap  Force rung re-evaluation even if existing LLM is reachable\n",
+        "       --[no-]dry-run       Compute the config but do not write it\n",
+        "       --log S              Override bootstrap-log path\n",
+        "   -?, --help\n",
+    )
 }
 
 #[derive(Debug)]
@@ -645,6 +777,38 @@ fn truncate_description(value: &str, max_chars: usize) -> String {
     }
     let keep = max_chars.saturating_sub(3);
     format!("{}...", value.chars().take(keep).collect::<String>())
+}
+
+#[derive(Debug)]
+struct ConfigBootstrapOptions {
+    auto: bool,
+    no_auto: bool,
+    profile: Option<String>,
+    skip_handoff: bool,
+    no_skip_handoff: bool,
+    re_bootstrap: bool,
+    no_re_bootstrap: bool,
+    dry_run: bool,
+    no_dry_run: bool,
+    log: Option<PathBuf>,
+}
+
+fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()> {
+    let projection = serde_json::json!({
+        "operation": "config",
+        "status": "not-implemented",
+        "network": false,
+        "writes": false,
+        "auto": opts.auto && !opts.no_auto,
+        "profile": opts.profile,
+        "skip_handoff": opts.skip_handoff && !opts.no_skip_handoff,
+        "re_bootstrap": opts.re_bootstrap && !opts.no_re_bootstrap,
+        "dry_run": opts.dry_run && !opts.no_dry_run,
+        "log": opts.log.map(|path| path.display().to_string()),
+        "note": "by-rs keeps config bootstrap read-only until Clojure parity is proven; use `by-rs config show` for config inspection."
+    });
+    println!("{}", serde_json::to_string_pretty(&projection)?);
+    Ok(())
 }
 
 fn print_config(path: Option<PathBuf>) -> Result<()> {
