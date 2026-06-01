@@ -358,6 +358,19 @@ fn config_help_matches_clojure_bootstrap_surface() {
 }
 
 #[test]
+fn config_requires_auto_when_stdin_is_non_interactive() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["config", "--dry-run"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "Non-interactive stdin detected. Use --auto for non-interactive runs.",
+        ));
+}
+
+#[test]
 fn config_bootstrap_projection_stays_read_only() {
     Command::cargo_bin("by-rs")
         .unwrap()

@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -943,12 +944,18 @@ struct ConfigBootstrapOptions {
 }
 
 fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()> {
+    let auto = opts.auto && !opts.no_auto;
+    if !auto && !std::io::stdin().is_terminal() {
+        eprintln!("Non-interactive stdin detected. Use --auto for non-interactive runs.");
+        std::process::exit(2);
+    }
+
     let projection = serde_json::json!({
         "operation": "config",
         "status": "not-implemented",
         "network": false,
         "writes": false,
-        "auto": opts.auto && !opts.no_auto,
+        "auto": auto,
         "profile": opts.profile,
         "skip_handoff": opts.skip_handoff && !opts.no_skip_handoff,
         "re_bootstrap": opts.re_bootstrap && !opts.no_re_bootstrap,
