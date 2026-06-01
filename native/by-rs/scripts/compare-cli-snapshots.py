@@ -29,6 +29,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clojure", required=True, type=pathlib.Path, help="Clojure snapshot directory")
     parser.add_argument("--rust", required=True, type=pathlib.Path, help="Rust snapshot directory")
+    parser.add_argument(
+        "--case",
+        action="append",
+        dest="selected_cases",
+        help="Compare only this case name; may be passed multiple times",
+    )
+    parser.add_argument(
+        "--ignore-case",
+        action="append",
+        default=[],
+        help="Skip this case name; may be passed multiple times",
+    )
     parser.add_argument("--strict", action="store_true", help="Exit non-zero when compared cases differ")
     parser.add_argument("--diff", action="store_true", help="Print combined-output unified diffs")
     parser.add_argument("--diff-lines", type=int, default=120, help="Maximum diff lines per case")
@@ -88,7 +100,12 @@ def main() -> int:
     args = parse_args()
     clj_cases = load_cases(args.clojure)
     rust_cases = load_cases(args.rust)
-    names = sorted(set(clj_cases) | set(rust_cases))
+    if args.selected_cases:
+        names = list(dict.fromkeys(args.selected_cases))
+    else:
+        names = sorted(set(clj_cases) | set(rust_cases))
+    ignored = set(args.ignore_case)
+    names = [name for name in names if name not in ignored]
 
     failures = 0
     compared = 0

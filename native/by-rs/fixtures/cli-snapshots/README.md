@@ -41,3 +41,15 @@ native/by-rs/scripts/compare-cli-snapshots.py \
 
 The comparison script reports current parity gaps without failing by default;
 pass `--strict` when a case is ready to become a gated compatibility check.
+Use repeated `--case` flags to gate only known-compatible cases while other
+commands are still being ported:
+
+```bash
+native/by-rs/scripts/compare-cli-snapshots.py \
+  --clojure native/by-rs/target/cli-snapshots/clojure \
+  --rust native/by-rs/target/cli-snapshots/rust \
+  --strict \
+  --case agents \
+  --case models \
+  --case sessions_list
+```
