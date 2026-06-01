@@ -101,6 +101,8 @@ mkdir -p "$project_dir"
 
 declare -a cases=(
   "top_help|--help"
+  "run_help|run --help"
+  "ask_help|ask --help"
   "agents|agents"
   "models|models"
   "config_help|config --help"

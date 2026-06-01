@@ -26,6 +26,21 @@ fn top_help_matches_clojure_command_surface() {
 }
 
 #[test]
+fn run_help_matches_clojure_command_surface() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["run", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "NAME:\n by run - Start interactive TUI agent session (default)",
+        ))
+        .stdout(predicate::str::contains("--[no-]inline"))
+        .stdout(predicate::str::contains("--[no-]with-tmux"))
+        .stdout(predicate::str::contains("--[no-]select-resume"));
+}
+
+#[test]
 fn agents_command_reads_registry_fixture() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("registry.json");
@@ -516,14 +531,19 @@ fn ask_dry_run_renders_bedrock_converse_request_without_network() {
 }
 
 #[test]
-fn ask_help_exposes_live_mode() {
+fn ask_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .args(["ask", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("--dry-run"))
-        .stdout(predicate::str::contains("--live"));
+        .stdout(predicate::str::contains(
+            "NAME:\n by ask - Ask a one-shot question (non-interactive)",
+        ))
+        .stdout(predicate::str::contains("coact-agent  Agent ID"))
+        .stdout(predicate::str::contains("claude-code  LM provider"))
+        .stdout(predicate::str::contains("--dry-run").not())
+        .stdout(predicate::str::contains("--live").not());
 }
 
 #[test]

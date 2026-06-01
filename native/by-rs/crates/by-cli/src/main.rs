@@ -328,6 +328,14 @@ where
             print!("{}", top_level_help());
             true
         }
+        [command, flag] if command == "run" && is_help_flag(flag) => {
+            print!("{}", run_help());
+            true
+        }
+        [command, flag] if command == "ask" && is_help_flag(flag) => {
+            print!("{}", ask_help());
+            true
+        }
         [command, flag] if command == "config" && is_help_flag(flag) => {
             print!("{}", config_help());
             true
@@ -364,6 +372,46 @@ fn top_level_help() -> String {
             "   -?, --help\n",
         ),
         env!("BY_BUILD_VERSION")
+    )
+}
+
+fn run_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by run - Start interactive TUI agent session (default)\n",
+        "\n",
+        "USAGE:\n",
+        " by run [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "   -a, --agent S             coact-agent  Agent ID\n",
+        "   -p, --provider S          claude-code  LM provider (claude-code, anthropic, openai, ollama)\n",
+        "   -m, --model S                          Model name override\n",
+        "   -i, --[no-]inline                      Inline mode (no alt screen)\n",
+        "   -v, --[no-]verbose                     Verbose output\n",
+        "       --[no-]with-tmux                   Require tmux side panes / popups (exit 1 if not in a tmux session)\n",
+        "   -n, --max-iterations N                 Max agent iterations\n",
+        "   -r, --resume S                         Resume a persisted session: bare = latest; --resume <id> = that session\n",
+        "       --[no-]select-resume               Pick a persisted session to resume from an interactive menu\n",
+        "       --[no-]new                         (deprecated; sessions start fresh by default — accepted as a no-op)\n",
+        "   -?, --help\n",
+    )
+}
+
+fn ask_help() -> &'static str {
+    concat!(
+        "NAME:\n",
+        " by ask - Ask a one-shot question (non-interactive)\n",
+        "\n",
+        "USAGE:\n",
+        " by ask [command options] [arguments...]\n",
+        "\n",
+        "OPTIONS:\n",
+        "   -a, --agent S           coact-agent  Agent ID\n",
+        "   -p, --provider S        claude-code  LM provider (claude-code, anthropic, openai, ollama)\n",
+        "   -m, --model S                        Model name override\n",
+        "   -n, --max-iterations N               Max agent iterations\n",
+        "   -?, --help\n",
     )
 }
 
