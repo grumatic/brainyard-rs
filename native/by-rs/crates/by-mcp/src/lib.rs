@@ -33,6 +33,14 @@ pub struct SseEvent {
     pub data: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpTool {
+    pub server_name: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub parameters: Value,
+}
+
 pub fn make_request(id: u64, method: &str, params: Value) -> Result<Value> {
     ensure_method(method)?;
     ensure_object(&params, "params")?;
@@ -275,6 +283,69 @@ pub fn extract_jsonrpc_result_from_json(body_text: &str, request_id: u64) -> Res
     Ok(object.get("result").cloned())
 }
 
+pub fn tools_from_list_result(server_name: &str, result: &Value) -> Result<Vec<McpTool>> {
+    ensure_nonblank(server_name, "server_name")?;
+    let object = result
+        .as_object()
+        .ok_or_else(|| anyhow!("MCP tools/list result must be an object"))?;
+    let tools = object
+        .get("tools")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("MCP tools/list result requires tools array"))?;
+
+    tools
+        .iter()
+        .map(|tool| tool_from_list_value(server_name, tool))
+        .collect()
+}
+
+pub fn project_tools_list_command_result(tools: &[McpTool]) -> Value {
+    let projected_tools = tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "server-name": tool.server_name,
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "result": {
+            "tools": projected_tools,
+            "total": tools.len(),
+        }
+    })
+}
+
+pub fn registered_tool_id(server_name: &str, tool_name: &str) -> Result<String> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(tool_name, "tool_name")?;
+    if !safe_clojure_symbol_name(server_name) {
+        bail!("MCP server name '{server_name}' cannot be registered as a Clojure symbol");
+    }
+    if !safe_clojure_symbol_name(tool_name) {
+        bail!("MCP tool name '{tool_name}' cannot be registered as a Clojure symbol");
+    }
+    Ok(format!("mcp${server_name}${tool_name}"))
+}
+
+pub fn safe_clojure_symbol_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|ch| {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '_' | '-' | '.' | '+' | '!' | '?' | '<' | '>' | '=')
+    })
+}
+
 pub fn validate_server_config(transport: &str, config: &Value) -> Result<()> {
     let transport = normalize_transport(transport);
     let config = config
@@ -298,6 +369,34 @@ pub fn validate_server_config(transport: &str, config: &Value) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn tool_from_list_value(server_name: &str, value: &Value) -> Result<McpTool> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("MCP tool descriptor must be an object"))?;
+    let name = object
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("MCP tool descriptor requires name"))?;
+    let description = object
+        .get("description")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    let parameters = object
+        .get("inputSchema")
+        .or_else(|| object.get("input_schema"))
+        .or_else(|| object.get("parameters"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+
+    Ok(McpTool {
+        server_name: server_name.to_string(),
+        name: name.to_string(),
+        description,
+        parameters,
+    })
 }
 
 fn push_sse_event(

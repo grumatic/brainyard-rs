@@ -2,9 +2,10 @@ use by_mcp::{
     build_http_headers, call_tool_request, extract_jsonrpc_result_from_json,
     extract_jsonrpc_result_from_sse, get_prompt_request, http_initialize_request,
     initialized_notification, list_resources_request, list_tools_request, make_error_response,
-    make_notification, make_request, make_response, parse_sse_events, read_resource_request,
-    stdio_initialize_request, validate_server_config, CLIENT_NAME, CLIENT_VERSION,
-    JSON_RPC_VERSION, MCP_VERSION,
+    make_notification, make_request, make_response, parse_sse_events,
+    project_tools_list_command_result, read_resource_request, registered_tool_id,
+    safe_clojure_symbol_name, stdio_initialize_request, tools_from_list_result,
+    validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
 use serde_json::json;
@@ -203,6 +204,66 @@ fn json_response_extraction_matches_clojure_read_response_rules() {
         3
     )
     .is_err());
+}
+
+#[test]
+fn tools_list_projection_matches_clojure_cache_shape() {
+    let result = extract_jsonrpc_result_from_json(
+        r#"{"jsonrpc":"2.0","id":7,"result":{"tools":[
+          {"name":"read_file","description":"Read a file","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
+          {"name":"list-dir","parameters":{"type":"object","properties":{"root":{"type":"string"}}}}
+        ]}}"#,
+        7,
+    )
+    .unwrap()
+    .unwrap();
+    let tools = tools_from_list_result("filesystem", &result).unwrap();
+
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0].server_name, "filesystem");
+    assert_eq!(tools[0].name, "read_file");
+    assert_eq!(tools[0].description.as_deref(), Some("Read a file"));
+    assert_eq!(tools[0].parameters["required"][0], "path");
+    assert_eq!(tools[1].parameters["properties"]["root"]["type"], "string");
+
+    assert_eq!(
+        project_tools_list_command_result(&tools),
+        json!({
+            "result": {
+                "tools": [
+                    {
+                        "server-name": "filesystem",
+                        "name": "read_file",
+                        "description": "Read a file",
+                        "parameters": {"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}
+                    },
+                    {
+                        "server-name": "filesystem",
+                        "name": "list-dir",
+                        "description": null,
+                        "parameters": {"type":"object","properties":{"root":{"type":"string"}}}
+                    }
+                ],
+                "total": 2
+            }
+        })
+    );
+}
+
+#[test]
+fn registered_tool_ids_match_clojure_dynamic_tool_rules() {
+    assert!(safe_clojure_symbol_name("filesystem"));
+    assert!(safe_clojure_symbol_name("read_file"));
+    assert!(safe_clojure_symbol_name("list-dir"));
+    assert!(safe_clojure_symbol_name("ask?"));
+    assert_eq!(
+        registered_tool_id("filesystem", "read_file").unwrap(),
+        "mcp$filesystem$read_file"
+    );
+
+    assert!(!safe_clojure_symbol_name("2bad"));
+    assert!(!safe_clojure_symbol_name("bad/name"));
+    assert!(registered_tool_id("filesystem", "bad/name").is_err());
 }
 
 #[test]

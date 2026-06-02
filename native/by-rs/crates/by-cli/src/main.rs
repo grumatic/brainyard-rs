@@ -266,6 +266,18 @@ enum McpCommand {
         #[arg(value_name = "SERVER_NAME")]
         server_name: String,
     },
+    /// Project a tools/list JSON-RPC fixture into the agent command result shape.
+    Tools {
+        /// MCP server name that produced the tools/list response.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Path to a tools/list JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: PathBuf,
+        /// JSON-RPC request id in the fixture response.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -421,6 +433,11 @@ fn run() -> Result<()> {
                 fixture,
                 server_name,
             } => print_mcp_config(fixture, server_name),
+            McpCommand::Tools {
+                server_name,
+                fixture_response,
+                request_id,
+            } => print_mcp_tools(server_name, fixture_response, request_id),
         },
         Commands::Sessions { command } => match command {
             SessionCommand::List { root } => print_sessions(root),
@@ -1022,6 +1039,41 @@ fn print_mcp_config(fixture: Option<PathBuf>, server_name: String) -> Result<()>
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+fn print_mcp_tools(server_name: String, fixture_response: PathBuf, request_id: u64) -> Result<()> {
+    let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+        format!(
+            "failed to read MCP tools/list response fixture {}",
+            fixture_response.display()
+        )
+    })?;
+    let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+        format!(
+            "failed to project MCP tools/list response fixture {}",
+            fixture_response.display()
+        )
+    })?;
+    let tools = by_mcp::tools_from_list_result(&server_name, &result)?;
+    let output = by_mcp::project_tools_list_command_result(&tools);
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn extract_mcp_fixture_result(raw: &str, request_id: u64) -> Result<serde_json::Value> {
+    if let Some(result) = by_mcp::extract_jsonrpc_result_from_json(raw, request_id)? {
+        return Ok(result);
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(raw).context("invalid MCP tools/list fixture JSON")?;
+    if value.get("tools").is_some() {
+        Ok(value)
+    } else if let Some(result) = value.get("result") {
+        Ok(result.clone())
+    } else {
+        bail!("MCP tools/list fixture must contain a tools array or JSON-RPC result");
+    }
 }
 
 fn load_mcp_servers_or_embedded(

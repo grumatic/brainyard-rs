@@ -499,6 +499,80 @@ fn mcp_config_hidden_command_projects_clojure_config_shape() {
 }
 
 #[test]
+fn mcp_tools_hidden_command_projects_clojure_list_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("tools-list-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":42,"result":{"tools":[
+          {"name":"read_file","description":"Read a file","inputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}},
+          {"name":"list-dir","inputSchema":{"type":"object","properties":{"root":{"type":"string"}}}}
+        ]}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "tools",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "42"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 2);
+    assert_eq!(value["result"]["tools"][0]["server-name"], "filesystem");
+    assert_eq!(value["result"]["tools"][0]["name"], "read_file");
+    assert_eq!(value["result"]["tools"][0]["description"], "Read a file");
+    assert_eq!(
+        value["result"]["tools"][0]["parameters"]["properties"]["path"]["type"],
+        "string"
+    );
+    assert_eq!(value["result"]["tools"][1]["name"], "list-dir");
+    assert_eq!(
+        value["result"]["tools"][1]["description"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn mcp_tools_hidden_command_accepts_raw_result_fixture() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("tools-list-result.json");
+    std::fs::write(
+        &fixture,
+        r#"{"tools":[{"name":"search","description":"Search docs","parameters":{"type":"object"}}]}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "tools",
+            "--server-name",
+            "linear",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 1);
+    assert_eq!(value["result"]["tools"][0]["server-name"], "linear");
+    assert_eq!(value["result"]["tools"][0]["parameters"]["type"], "object");
+}
+
+#[test]
 fn config_help_matches_clojure_bootstrap_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
