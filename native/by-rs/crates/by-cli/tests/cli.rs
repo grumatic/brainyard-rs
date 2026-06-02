@@ -743,6 +743,93 @@ fn ask_dry_run_resolves_user_id_from_environment_when_flag_blank() {
 }
 
 #[test]
+fn ask_dry_run_reads_user_id_and_bedrock_runtime_from_project_dotenv() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let nested = project.path().join("nested/work");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(
+        project.path().join(".env"),
+        r#"
+        BY_USER_ID=dotenv-user
+        AWS_REGION=ap-northeast-2
+        AWS_PROFILE=dotenv-profile
+        "#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(&nested)
+        .env("HOME", home.path())
+        .env_remove("BY_ENV_FILE")
+        .env_remove("BY_NO_DOTENV")
+        .env_remove("BY_USER_ID")
+        .env_remove("AWS_REGION")
+        .env_remove("AWS_DEFAULT_REGION")
+        .env_remove("AWS_PROFILE")
+        .env_remove("AWS_DEFAULT_PROFILE")
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"user_id\": \"dotenv-user\""))
+        .stdout(predicate::str::contains("\"region\": \"ap-northeast-2\""))
+        .stdout(predicate::str::contains(
+            "\"aws_profile\": \"dotenv-profile\"",
+        ));
+}
+
+#[test]
+fn ask_dry_run_prefers_environment_over_project_dotenv() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join(".env"),
+        r#"
+        BY_USER_ID=dotenv-user
+        AWS_REGION=ap-northeast-2
+        AWS_PROFILE=dotenv-profile
+        "#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env_remove("BY_ENV_FILE")
+        .env_remove("BY_NO_DOTENV")
+        .env("BY_USER_ID", "env-user")
+        .env("AWS_REGION", "eu-west-1")
+        .env("AWS_PROFILE", "env-profile")
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"user_id\": \"env-user\""))
+        .stdout(predicate::str::contains("\"region\": \"eu-west-1\""))
+        .stdout(predicate::str::contains("\"aws_profile\": \"env-profile\""))
+        .stdout(predicate::str::contains("dotenv-user").not())
+        .stdout(predicate::str::contains("ap-northeast-2").not())
+        .stdout(predicate::str::contains("dotenv-profile").not());
+}
+
+#[test]
 fn ask_dry_run_renders_bedrock_converse_request_without_network() {
     Command::cargo_bin("by-rs")
         .unwrap()
@@ -994,6 +1081,7 @@ fn ask_dry_run_explicit_region_and_profile_win_over_environment() {
 fn ask_dry_run_exposes_bedrock_inference_overrides() {
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("BY_NO_DOTENV", "1")
         .env_remove("AWS_REGION")
         .env_remove("AWS_DEFAULT_REGION")
         .env_remove("AWS_PROFILE")

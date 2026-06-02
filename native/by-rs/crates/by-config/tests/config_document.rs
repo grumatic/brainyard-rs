@@ -1,6 +1,6 @@
 use by_config::{
-    read_config, resolve_default_config_path, resolve_user_id, AgentConfig, BrainyardDirs,
-    LlmConfig, UserIdInputs,
+    load_dotenv_values, read_config, resolve_default_config_path, resolve_user_id, AgentConfig,
+    BrainyardDirs, LlmConfig, UserIdInputs,
 };
 use std::fs;
 
@@ -162,4 +162,88 @@ fn user_id_resolution_falls_back_to_by_user() {
     });
 
     assert_eq!(resolved, "by-user");
+}
+
+#[test]
+fn dotenv_values_walk_from_working_dir_to_home_and_preserve_first_key() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let nested = project.path().join("nested/work");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(home.path().join(".brainyard")).unwrap();
+    fs::write(
+        project.path().join(".env"),
+        r#"
+        BY_USER_ID="project-user"
+        AWS_REGION=ap-northeast-2
+        "#,
+    )
+    .unwrap();
+    fs::write(
+        home.path().join(".brainyard/.env"),
+        r#"
+        AWS_PROFILE='home-profile'
+        AWS_REGION=us-east-1
+        "#,
+    )
+    .unwrap();
+
+    let dotenv = load_dotenv_values(&nested, Some(home.path()), None, false, &|_| false).unwrap();
+
+    assert_eq!(dotenv.get("BY_USER_ID"), Some("project-user"));
+    assert_eq!(dotenv.get("AWS_REGION"), Some("ap-northeast-2"));
+    assert_eq!(dotenv.get("AWS_PROFILE"), Some("home-profile"));
+    assert_eq!(dotenv.loaded_paths.len(), 2);
+    assert_eq!(dotenv.loaded_paths[0].path, project.path().join(".env"));
+    assert_eq!(
+        dotenv.loaded_paths[0].keys,
+        vec!["BY_USER_ID".to_string(), "AWS_REGION".to_string()]
+    );
+    assert_eq!(
+        dotenv.loaded_paths[1].path,
+        home.path().join(".brainyard/.env")
+    );
+    assert_eq!(dotenv.loaded_paths[1].keys, vec!["AWS_PROFILE".to_string()]);
+}
+
+#[test]
+fn dotenv_values_skip_existing_env_keys_and_parse_export_quotes() {
+    let project = tempfile::tempdir().unwrap();
+    fs::write(
+        project.path().join(".env"),
+        r#"
+        export AWS_PROFILE="dotenv-profile"
+        BY_USER_ID='dotenv-user'
+        "#,
+    )
+    .unwrap();
+
+    let dotenv = load_dotenv_values(project.path(), None, None, false, &|key| {
+        key == "AWS_PROFILE"
+    })
+    .unwrap();
+
+    assert_eq!(dotenv.get("AWS_PROFILE"), None);
+    assert_eq!(dotenv.get("BY_USER_ID"), Some("dotenv-user"));
+    assert_eq!(dotenv.loaded_paths[0].keys, vec!["BY_USER_ID".to_string()]);
+}
+
+#[test]
+fn dotenv_values_honor_explicit_file_and_skip_flag() {
+    let project = tempfile::tempdir().unwrap();
+    let explicit_dir = tempfile::tempdir().unwrap();
+    let explicit = explicit_dir.path().join("brainyard.env");
+    fs::write(project.path().join(".env"), "BY_USER_ID=project-user").unwrap();
+    fs::write(&explicit, "BY_USER_ID=explicit-user").unwrap();
+
+    let dotenv =
+        load_dotenv_values(project.path(), None, Some(&explicit), false, &|_| false).unwrap();
+    assert_eq!(dotenv.get("BY_USER_ID"), Some("explicit-user"));
+    assert_eq!(dotenv.loaded_paths.len(), 1);
+    assert_eq!(dotenv.loaded_paths[0].path, explicit);
+
+    let skipped =
+        load_dotenv_values(project.path(), None, Some(&explicit), true, &|_| false).unwrap();
+    assert!(skipped.values.is_empty());
+    assert!(skipped.loaded_paths.is_empty());
 }

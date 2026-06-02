@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use by_contracts::{parse_map, EdnMap, EdnValue};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +37,24 @@ pub struct UserIdInputs<'a> {
     pub by_user_id_env: Option<&'a str>,
     pub by_user_id_property: Option<&'a str>,
     pub os_user_name: Option<&'a str>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DotenvValues {
+    pub values: BTreeMap<String, String>,
+    pub loaded_paths: Vec<DotenvLoadedPath>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DotenvLoadedPath {
+    pub path: PathBuf,
+    pub keys: Vec<String>,
+}
+
+impl DotenvValues {
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(String::as_str)
+    }
 }
 
 impl ConfigDocument {
@@ -123,16 +142,91 @@ pub fn resolve_user_id(inputs: UserIdInputs<'_>) -> String {
 }
 
 pub fn resolve_process_user_id(explicit: Option<&str>) -> String {
-    let by_user_id_env = std::env::var("BY_USER_ID").ok();
+    let dotenv = load_process_dotenv().unwrap_or_default();
+    resolve_process_user_id_with_dotenv(explicit, &dotenv)
+}
+
+pub fn resolve_process_user_id_with_dotenv(
+    explicit: Option<&str>,
+    dotenv: &DotenvValues,
+) -> String {
+    let by_user_id = process_env_or_dotenv(dotenv, "BY_USER_ID");
     let os_user_name = std::env::var("USER")
         .ok()
         .or_else(|| std::env::var("USERNAME").ok());
 
     resolve_user_id(UserIdInputs {
         explicit,
-        by_user_id_env: by_user_id_env.as_deref(),
+        by_user_id_env: by_user_id.as_deref(),
         by_user_id_property: None,
         os_user_name: os_user_name.as_deref(),
+    })
+}
+
+pub fn process_env_or_dotenv(dotenv: &DotenvValues, key: &str) -> Option<String> {
+    match std::env::var_os(key) {
+        Some(value) => Some(value.to_string_lossy().into_owned()),
+        None => dotenv.get(key).map(ToOwned::to_owned),
+    }
+}
+
+pub fn load_process_dotenv() -> Result<DotenvValues> {
+    let working_dir = std::env::current_dir()?;
+    let home_dir = std::env::var_os("HOME").map(PathBuf::from);
+    let explicit_env_file = std::env::var_os("BY_ENV_FILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_file());
+    let skip = std::env::var_os("BY_NO_DOTENV").is_some_and(|value| !value.is_empty());
+
+    load_dotenv_values(
+        &working_dir,
+        home_dir.as_deref(),
+        explicit_env_file.as_deref(),
+        skip,
+        &|key| std::env::var_os(key).is_some(),
+    )
+}
+
+pub fn load_dotenv_values(
+    working_dir: &Path,
+    home_dir: Option<&Path>,
+    explicit_env_file: Option<&Path>,
+    skip: bool,
+    env_contains_key: &dyn Fn(&str) -> bool,
+) -> Result<DotenvValues> {
+    if skip {
+        return Ok(DotenvValues::default());
+    }
+
+    let mut values = BTreeMap::new();
+    let mut loaded_paths = Vec::new();
+
+    for path in dotenv_candidate_paths(working_dir, home_dir, explicit_env_file) {
+        if !path.is_file() {
+            continue;
+        }
+
+        let raw = std::fs::read_to_string(&path)?;
+        let mut keys = Vec::new();
+        for line in raw.lines() {
+            let Some((key, value)) = parse_dotenv_line(line) else {
+                continue;
+            };
+            if values.contains_key(&key) || env_contains_key(&key) {
+                continue;
+            }
+            values.insert(key.clone(), value);
+            keys.push(key);
+        }
+        if !keys.is_empty() {
+            loaded_paths.push(DotenvLoadedPath { path, keys });
+        }
+    }
+
+    Ok(DotenvValues {
+        values,
+        loaded_paths,
     })
 }
 
@@ -143,6 +237,66 @@ fn first_non_blank<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Opt
         .map(str::trim)
         .find(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn dotenv_candidate_paths(
+    working_dir: &Path,
+    home_dir: Option<&Path>,
+    explicit_env_file: Option<&Path>,
+) -> Vec<PathBuf> {
+    if let Some(explicit_env_file) = explicit_env_file {
+        return vec![explicit_env_file.to_path_buf()];
+    }
+
+    let mut paths = Vec::new();
+    let mut dir = Some(working_dir);
+    while let Some(current) = dir {
+        push_distinct_path(&mut paths, current.join(".env"));
+        dir = current.parent();
+    }
+    if let Some(home_dir) = home_dir {
+        push_distinct_path(&mut paths, home_dir.join(".brainyard/.env"));
+    }
+    paths
+}
+
+fn push_distinct_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+fn parse_dotenv_line(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+
+    let (key, value) = trimmed.split_once('=')?;
+    let key = key.trim();
+    let key = key.strip_prefix("export ").unwrap_or(key).trim();
+    if key.is_empty() {
+        return None;
+    }
+
+    let value = strip_matching_quotes(value.trim()).to_string();
+    Some((key.to_string(), value))
+}
+
+fn strip_matching_quotes(value: &str) -> &str {
+    if value.len() < 2 {
+        return value;
+    }
+
+    let bytes = value.as_bytes();
+    if matches!(
+        (bytes.first(), bytes.last()),
+        (Some(b'"'), Some(b'"')) | (Some(b'\''), Some(b'\''))
+    ) {
+        &value[1..value.len() - 1]
+    } else {
+        value
+    }
 }
 
 fn find_git_root(start_dir: &Path) -> Option<PathBuf> {

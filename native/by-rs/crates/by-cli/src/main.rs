@@ -710,13 +710,14 @@ fn print_ask(args: AskRequest) -> Result<()> {
         bail!("by-rs ask currently supports provider 'bedrock' only");
     }
 
+    let dotenv = by_config::load_process_dotenv()?;
     let runtime = by_llm::resolve_bedrock_runtime_options(by_llm::BedrockRuntimeInputs {
         explicit_region: args.region,
-        aws_region: std::env::var("AWS_REGION").ok(),
-        aws_default_region: std::env::var("AWS_DEFAULT_REGION").ok(),
+        aws_region: by_config::process_env_or_dotenv(&dotenv, "AWS_REGION"),
+        aws_default_region: by_config::process_env_or_dotenv(&dotenv, "AWS_DEFAULT_REGION"),
         explicit_profile: args.aws_profile,
-        aws_profile: std::env::var("AWS_PROFILE").ok(),
-        aws_default_profile: std::env::var("AWS_DEFAULT_PROFILE").ok(),
+        aws_profile: by_config::process_env_or_dotenv(&dotenv, "AWS_PROFILE"),
+        aws_default_profile: by_config::process_env_or_dotenv(&dotenv, "AWS_DEFAULT_PROFILE"),
     });
 
     let config = by_llm::BedrockConfig {
@@ -730,7 +731,8 @@ fn print_ask(args: AskRequest) -> Result<()> {
 
     if args.dry_run {
         let request = by_llm::build_bedrock_request(&config, &messages);
-        let user_id = by_config::resolve_process_user_id(args.user_id.as_deref());
+        let user_id =
+            by_config::resolve_process_user_id_with_dotenv(args.user_id.as_deref(), &dotenv);
         let dry_run = serde_json::json!({
             "provider": "bedrock",
             "operation": "Converse",
