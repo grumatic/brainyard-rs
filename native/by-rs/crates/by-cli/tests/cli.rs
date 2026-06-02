@@ -2021,6 +2021,80 @@ fn ask_dry_run_uses_project_config_defaults_before_user_config() {
 }
 
 #[test]
+fn ask_dry_run_resolves_default_agent_from_project_config() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".git")).unwrap();
+    std::fs::create_dir_all(project.path().join(".brainyard")).unwrap();
+    std::fs::write(
+        project.path().join(".brainyard/config.edn"),
+        r#"{:agent {:default-agent :main-agent}
+            :llm {:default-provider :bedrock
+                  :default-model "amazon.nova-lite-v1:0"}}"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env_remove("BRAINYARD_PROJECT_DIR")
+        .args(["ask", "--dry-run", "What is 2+2?"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"agent_id\": \"main-agent\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"amazon.nova-lite-v1:0\"",
+        ));
+}
+
+#[test]
+fn ask_dry_run_explicit_agent_wins_over_config_default() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".git")).unwrap();
+    std::fs::create_dir_all(project.path().join(".brainyard")).unwrap();
+    std::fs::write(
+        project.path().join(".brainyard/config.edn"),
+        r#"{:agent {:default-agent :main-agent}
+            :llm {:default-provider :bedrock
+                  :default-model "amazon.nova-lite-v1:0"}}"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env_remove("BRAINYARD_PROJECT_DIR")
+        .args(["ask", "-a", "research-agent", "--dry-run", "What is 2+2?"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"agent_id\": \"research-agent\""))
+        .stdout(predicate::str::contains("\"agent_id\": \"main-agent\"").not());
+}
+
+#[test]
+fn ask_dry_run_exposes_explicit_max_iterations_override() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "-p",
+            "bedrock",
+            "-m",
+            "amazon.nova-lite-v1:0",
+            "-n",
+            "7",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"max_iterations\": 7"));
+}
+
+#[test]
 fn help_exposes_memory_search_command() {
     Command::cargo_bin("by-rs")
         .unwrap()

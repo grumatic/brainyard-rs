@@ -84,7 +84,7 @@ enum Commands {
     },
     /// Ask a one-shot question. Bedrock supports dry-run shaping or explicit live calls.
     Ask {
-        /// Agent ID. Reserved for later full agent execution parity.
+        /// Agent ID. Dry-run metadata follows Clojure default-agent precedence.
         #[arg(long, short = 'a', default_value = "coact-agent", value_name = "ID")]
         agent: String,
         /// LM provider. Only bedrock is implemented in by-rs for now.
@@ -98,7 +98,7 @@ enum Commands {
         /// Model name override. Required for Bedrock when config does not provide a default.
         #[arg(long, short = 'm', value_name = "MODEL")]
         model: Option<String>,
-        /// Max agent iterations. Reserved for later full agent execution parity.
+        /// Max agent iterations. Included as a dry-run agent-session override.
         #[arg(long, short = 'n', value_name = "N")]
         max_iterations: Option<usize>,
         /// User identity for sessions/memory. Reserved for later full agent execution parity.
@@ -506,10 +506,10 @@ fn run() -> Result<()> {
             bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
         }
         Commands::Ask {
-            agent: _agent,
+            agent,
             provider,
             model,
-            max_iterations: _max_iterations,
+            max_iterations,
             user_id,
             region,
             aws_profile,
@@ -521,8 +521,10 @@ fn run() -> Result<()> {
             fixture_response,
             question,
         } => print_ask(AskRequest {
+            agent,
             provider,
             model,
+            max_iterations,
             user_id,
             region,
             aws_profile,
@@ -1002,8 +1004,10 @@ fn sessions_prune_help() -> &'static str {
 
 #[derive(Debug)]
 struct AskRequest {
+    agent: String,
     provider: String,
     model: Option<String>,
+    max_iterations: Option<usize>,
     user_id: Option<String>,
     region: Option<String>,
     aws_profile: Option<String>,
@@ -1033,7 +1037,17 @@ fn print_ask(args: AskRequest) -> Result<()> {
         bail!("by-rs ask requires --dry-run or --live");
     }
 
-    let llm_config = read_default_llm_config()?;
+    let default_config = read_default_config()?;
+    let llm_config = default_config.as_ref().map(by_config::ConfigDocument::llm);
+    let agent_config = default_config
+        .as_ref()
+        .map(by_config::ConfigDocument::agent);
+    let resolved_agent = resolve_ask_agent(
+        args.agent,
+        agent_config
+            .as_ref()
+            .and_then(|config| config.default_agent.as_deref()),
+    );
     let resolved_provider = match provider.as_str() {
         "claude-code" => llm_config
             .as_ref()
@@ -1083,9 +1097,7 @@ fn print_ask(args: AskRequest) -> Result<()> {
             "provider": resolved_provider,
             "operation": projection.operation,
             "network": false,
-            "agent_session": {
-                "user_id": user_id,
-            },
+            "agent_session": ask_agent_session(&resolved_agent, user_id, args.max_iterations),
             "request": projection.request,
         });
         println!("{}", serde_json::to_string_pretty(&dry_run)?);
@@ -1123,9 +1135,7 @@ fn print_ask(args: AskRequest) -> Result<()> {
             "provider": "bedrock",
             "operation": "Converse",
             "network": false,
-            "agent_session": {
-                "user_id": user_id,
-            },
+            "agent_session": ask_agent_session(&resolved_agent, user_id, args.max_iterations),
             "region": runtime.region,
             "aws_profile": runtime.aws_profile,
             "request": request,
@@ -1149,6 +1159,34 @@ fn print_ask(args: AskRequest) -> Result<()> {
         println!("{}", response.text);
     }
     Ok(())
+}
+
+fn resolve_ask_agent(cli_agent: String, config_default_agent: Option<&str>) -> String {
+    if cli_agent != "coact-agent" && !cli_agent.trim().is_empty() {
+        return cli_agent;
+    }
+
+    config_default_agent
+        .filter(|agent| !agent.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or(cli_agent)
+}
+
+fn ask_agent_session(
+    agent_id: &str,
+    user_id: String,
+    max_iterations: Option<usize>,
+) -> serde_json::Value {
+    let mut session = serde_json::Map::new();
+    session.insert("agent_id".to_string(), serde_json::json!(agent_id));
+    session.insert("user_id".to_string(), serde_json::json!(user_id));
+    if let Some(max_iterations) = max_iterations {
+        session.insert(
+            "max_iterations".to_string(),
+            serde_json::json!(max_iterations),
+        );
+    }
+    serde_json::Value::Object(session)
 }
 
 fn print_missing_ask_question_and_exit() -> ! {
@@ -2340,7 +2378,7 @@ fn print_tui_snapshot(agent: String, model: String, rows: usize, cols: usize) ->
     Ok(())
 }
 
-fn read_default_llm_config() -> Result<Option<by_config::LlmConfig>> {
+fn read_default_config() -> Result<Option<by_config::ConfigDocument>> {
     let Some(path) = default_config_path() else {
         return Ok(None);
     };
@@ -2348,7 +2386,7 @@ fn read_default_llm_config() -> Result<Option<by_config::LlmConfig>> {
         return Ok(None);
     }
     by_config::read_config(&path)
-        .map(|config| Some(config.llm()))
+        .map(Some)
         .with_context(|| format!("failed to read default config {}", path.display()))
 }
 
