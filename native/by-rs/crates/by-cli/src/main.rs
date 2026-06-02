@@ -541,7 +541,8 @@ fn run() -> Result<()> {
             no_new: _no_new,
             positional: _positional,
         } => {
-            preflight_run_session_selection(select_resume, resume.as_deref())?;
+            let _session_selection =
+                preflight_run_session_selection(select_resume, resume.as_deref())?;
             preflight_run_tmux(with_tmux);
             bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
         }
@@ -2400,23 +2401,50 @@ fn resolve_memory_db_path(db: Option<PathBuf>, user_id: Option<String>) -> Resul
         .context("could not determine default memory database path; pass --db or set HOME")
 }
 
-fn preflight_run_session_selection(select_resume: bool, resume: Option<&str>) -> Result<()> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RunSessionSelection {
+    session_id: Option<String>,
+    resume: bool,
+}
+
+impl RunSessionSelection {
+    fn fresh() -> Self {
+        Self {
+            session_id: None,
+            resume: false,
+        }
+    }
+
+    fn resume(session_id: String) -> Self {
+        Self {
+            session_id: Some(session_id),
+            resume: true,
+        }
+    }
+}
+
+fn preflight_run_session_selection(
+    select_resume: bool,
+    resume: Option<&str>,
+) -> Result<RunSessionSelection> {
     if select_resume {
         let root = default_sessions_root().context("could not determine default session root")?;
         let sessions = sorted_sessions_by_activity(&root)?;
-        let _picked = pick_session_interactive(&sessions)?;
-        return Ok(());
+        let picked = pick_session_interactive(&sessions)?;
+        return Ok(run_selection_from_pick(picked));
     }
 
     preflight_run_resume(resume)
 }
 
-fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
+fn preflight_run_resume(resume: Option<&str>) -> Result<RunSessionSelection> {
     let Some(resume) = resume else {
-        return Ok(());
+        return Ok(RunSessionSelection::fresh());
     };
     if resume == RESUME_LATEST_SENTINEL {
-        return Ok(());
+        let root = default_sessions_root().context("could not determine default session root")?;
+        let sessions = sorted_sessions_by_activity(&root)?;
+        return Ok(select_latest_resume_session(&sessions));
     }
 
     let root = default_sessions_root().context("could not determine default session root")?;
@@ -2426,7 +2454,17 @@ fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
         std::process::exit(1);
     }
 
-    Ok(())
+    Ok(RunSessionSelection::resume(resume.to_string()))
+}
+
+fn run_selection_from_pick(picked: Option<String>) -> RunSessionSelection {
+    picked
+        .map(RunSessionSelection::resume)
+        .unwrap_or_else(RunSessionSelection::fresh)
+}
+
+fn select_latest_resume_session(sessions: &[by_persist::SessionSummary]) -> RunSessionSelection {
+    run_selection_from_pick(sessions.first().map(|session| session.id.clone()))
 }
 
 fn sorted_sessions_by_activity(root: &Path) -> Result<Vec<by_persist::SessionSummary>> {
@@ -2446,26 +2484,42 @@ fn sorted_sessions_by_activity(root: &Path) -> Result<Vec<by_persist::SessionSum
 }
 
 fn pick_session_interactive(sessions: &[by_persist::SessionSummary]) -> Result<Option<String>> {
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let mut output = io::stdout();
+    pick_session_with_io(sessions, &mut input, &mut output)
+}
+
+fn pick_session_with_io<R: io::BufRead, W: Write>(
+    sessions: &[by_persist::SessionSummary],
+    input: &mut R,
+    output: &mut W,
+) -> Result<Option<String>> {
     let n = sessions.len();
     if n == 0 {
         return Ok(None);
     }
 
-    println!();
-    println!("{n} persisted session(s) — pick one to resume, or [N] for a new session:");
-    println!("{}", "-".repeat(72));
-    println!(
+    writeln!(output)?;
+    writeln!(
+        output,
+        "{n} persisted session(s) — pick one to resume, or [N] for a new session:"
+    )?;
+    writeln!(output, "{}", "-".repeat(72))?;
+    writeln!(
+        output,
         " {:>3}  {:<30} {:<14} {:<18} {:<10} last",
         "#", "session-id", "label", "agent", "size"
-    );
-    println!("{}", "-".repeat(88));
+    )?;
+    writeln!(output, "{}", "-".repeat(88))?;
     for (index, session) in sessions.iter().enumerate() {
         let last = session
             .last_attached_at_millis
             .or(session.started_at_millis)
             .and_then(format_age_millis)
             .unwrap_or_else(|| "-".to_string());
-        println!(
+        writeln!(
+            output,
             " {:>3}  {:<30} {:<14} {:<18} {:<10} {}",
             index + 1,
             session.id,
@@ -2473,14 +2527,14 @@ fn pick_session_interactive(sessions: &[by_persist::SessionSummary]) -> Result<O
             session.agent.as_deref().unwrap_or("-"),
             format_bytes(session.bytes),
             last
-        );
+        )?;
     }
-    println!();
-    print!("Choice [1- {n} ] / (N)ew: ");
-    io::stdout().flush()?;
+    writeln!(output)?;
+    write!(output, "Choice [1- {n} ] / (N)ew: ")?;
+    output.flush()?;
 
     let mut line = String::new();
-    let bytes_read = io::stdin().read_line(&mut line)?;
+    let bytes_read = input.read_line(&mut line)?;
     if bytes_read == 0 {
         return Ok(None);
     }
@@ -2815,6 +2869,68 @@ mod tests {
             last_attached_at_millis: None,
             path: PathBuf::from(id),
         }
+    }
+
+    #[test]
+    fn resume_picker_renders_clojure_prompt_and_selects_number() {
+        let sessions = vec![
+            session("newer", "New", "main-agent", 1),
+            session("older", "Old", "coact-agent", 2048),
+        ];
+        let mut input = Cursor::new(b"2\n".to_vec());
+        let mut output = Vec::new();
+
+        let picked = pick_session_with_io(&sessions, &mut input, &mut output).unwrap();
+
+        assert_eq!(picked, Some("older".to_string()));
+        let stdout = String::from_utf8(output).unwrap();
+        assert!(stdout
+            .contains("2 persisted session(s) — pick one to resume, or [N] for a new session:"));
+        assert!(stdout.contains("Choice [1- 2 ] / (N)ew: "));
+        assert!(stdout.contains("newer"));
+        assert!(stdout.contains("older"));
+        assert!(
+            stdout.find("newer").unwrap() < stdout.find("older").unwrap(),
+            "sessions should render in caller-provided order: {stdout}"
+        );
+    }
+
+    #[test]
+    fn resume_picker_new_returns_fresh_selection() {
+        let sessions = vec![session("alpha", "Alpha", "coact-agent", 0)];
+        let mut input = Cursor::new(b"N\n".to_vec());
+        let mut output = Vec::new();
+
+        let picked = pick_session_with_io(&sessions, &mut input, &mut output).unwrap();
+
+        assert_eq!(picked, None);
+        assert_eq!(
+            run_selection_from_pick(picked),
+            RunSessionSelection::fresh()
+        );
+        let stdout = String::from_utf8(output).unwrap();
+        assert!(stdout.contains("Choice [1- 1 ] / (N)ew: "));
+    }
+
+    #[test]
+    fn latest_resume_selection_resumes_first_sorted_session() {
+        let sessions = vec![
+            session("newer", "New", "main-agent", 1),
+            session("older", "Old", "coact-agent", 2048),
+        ];
+
+        assert_eq!(
+            select_latest_resume_session(&sessions),
+            RunSessionSelection::resume("newer".to_string())
+        );
+    }
+
+    #[test]
+    fn latest_resume_selection_without_sessions_starts_fresh() {
+        assert_eq!(
+            select_latest_resume_session(&[]),
+            RunSessionSelection::fresh()
+        );
     }
 
     #[test]

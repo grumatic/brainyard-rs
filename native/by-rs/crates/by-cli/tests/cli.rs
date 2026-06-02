@@ -192,8 +192,11 @@ fn bare_agent_id_is_routed_to_run_command() {
 
 #[test]
 fn run_accepts_bare_resume_flag_like_clojure() {
+    let home = tempfile::tempdir().unwrap();
+
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("HOME", home.path())
         .args(["run", "--resume"])
         .assert()
         .failure()
