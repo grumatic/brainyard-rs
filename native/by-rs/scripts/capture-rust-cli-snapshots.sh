@@ -115,6 +115,7 @@ declare -a cases=(
   "top_version_long|--version"
   "top_version_short|-V"
   "run_help|run --help"
+  "run_resume_missing|run --resume missing"
   "ask_help|ask --help"
   "ask_missing_question|ask"
   "ask_missing_question_bedrock|ask --provider bedrock --model amazon.nova-lite-v1:0"
