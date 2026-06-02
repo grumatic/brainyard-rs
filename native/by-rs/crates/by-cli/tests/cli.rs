@@ -160,6 +160,32 @@ fn agents_command_reads_registry_fixture() {
 }
 
 #[test]
+fn agents_command_truncates_multiline_descriptions_like_clojure() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("registry.json");
+    let registry = serde_json::json!({
+        "agents": [{
+            "id": "coder",
+            "name": "Coder",
+            "description": "First line\n    second line\nthird line"
+        }],
+        "models": []
+    });
+    std::fs::write(&fixture, registry.to_string()).unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["agents", "--fixture"])
+        .arg(&fixture)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+
+    assert!(stdout.contains("  coder       First line\n              second line ..."));
+    assert!(!stdout.contains("third line"));
+}
+
+#[test]
 fn agents_command_uses_embedded_registry_by_default() {
     Command::cargo_bin("by-rs")
         .unwrap()
@@ -446,6 +472,35 @@ fn models_command_displays_region_when_present() {
         .stdout(predicate::str::contains(
             "openai.gpt-oss-120b-1:0 (us-east-1)",
         ));
+}
+
+#[test]
+fn models_command_truncates_long_descriptions_like_clojure() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("registry.json");
+    let registry = serde_json::json!({
+        "agents": [],
+        "models": [{
+            "provider": "bedrock",
+            "id": "amazon.nova-lite-v1:0",
+            "description": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        }]
+    });
+    std::fs::write(&fixture, registry.to_string()).unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["models", "--fixture"])
+        .arg(&fixture)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234...",
+        ))
+        .stdout(
+            predicate::str::contains("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
+                .not(),
+        );
 }
 
 #[test]
