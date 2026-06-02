@@ -22,6 +22,7 @@ fn top_help_matches_clojure_command_surface() {
         .stdout(predicate::str::contains("sessions"))
         .stdout(predicate::str::contains("tools").not())
         .stdout(predicate::str::contains("memory").not())
+        .stdout(predicate::str::contains("mcp").not())
         .stdout(predicate::str::contains("tui").not());
 }
 
@@ -430,6 +431,71 @@ fn tools_command_reads_standalone_tools_fixture_and_filters_by_id() {
             "1 tool(s) listed. (filtered to id grep)",
         ))
         .stdout(predicate::str::contains("memory$recall").not());
+}
+
+#[test]
+fn mcp_servers_hidden_command_projects_clojure_list_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("registry.json");
+    std::fs::write(
+        &fixture,
+        r#"{"agents":[],"models":[],"mcpServers":[
+             {"name":"filesystem","transport":"stdio","config":{"command":"npx","args":["-y","server"]},"enabled":false,"autoRegisterTools":true},
+             {"name":"api-server","transport":"http","config":{"url":"https://api.example.com"},"enabled":false,"autoRegisterTools":true}
+           ]}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["mcp", "servers", "--fixture"])
+        .arg(&fixture)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 2);
+    assert_eq!(value["result"]["connected"], 0);
+    assert_eq!(value["result"]["servers"][0]["name"], "api-server");
+    assert_eq!(value["result"]["servers"][0]["connected"], false);
+    assert_eq!(value["result"]["servers"][0]["transport"], "http");
+    assert_eq!(value["result"]["servers"][1]["name"], "filesystem");
+    assert_eq!(value["result"]["servers"][1]["transport"], "stdio");
+}
+
+#[test]
+fn mcp_config_hidden_command_projects_clojure_config_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("mcp-servers.json");
+    std::fs::write(
+        &fixture,
+        r#"{
+          "gmail": {
+            "transport": "stdio",
+            "config": {"command": "bash", "args": ["-c", "npx -y mcp-remote https://gmailmcp.googleapis.com/mcp/v1"]},
+            "enabled": false,
+            "auto-register-tools": true
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["mcp", "config", "--fixture"])
+        .arg(&fixture)
+        .arg("gmail")
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "gmail");
+    assert_eq!(value["result"]["config"]["transport"], "stdio");
+    assert_eq!(value["result"]["config"]["enabled"], false);
+    assert_eq!(value["result"]["config"]["auto-register-tools"], true);
+    assert_eq!(value["result"]["config"]["config"]["command"], "bash");
 }
 
 #[test]

@@ -659,6 +659,7 @@ dependencies = [
  "assert_cmd",
  "by-config",
  "by-llm",
+ "by-mcp",
  "by-memory",
  "by-persist",
  "by-registry",

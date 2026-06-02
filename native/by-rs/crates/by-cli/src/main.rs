@@ -199,6 +199,12 @@ enum Commands {
         #[command(subcommand)]
         command: MemoryCommand,
     },
+    /// Inspect configured MCP servers from fixture data without connecting.
+    #[command(hide = true)]
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
     /// Inspect Brainyard session directories.
     Sessions {
         #[command(subcommand)]
@@ -240,6 +246,25 @@ enum MemoryCommand {
         /// Maximum number of combined hits to print.
         #[arg(long, default_value_t = 20, value_name = "N")]
         limit: usize,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum McpCommand {
+    /// List configured MCP servers without connecting.
+    Servers {
+        /// Path to an exported registry or MCP servers JSON fixture.
+        #[arg(long, value_name = "PATH")]
+        fixture: Option<PathBuf>,
+    },
+    /// Print one configured MCP server entry without connecting.
+    Config {
+        /// Path to an exported registry or MCP servers JSON fixture.
+        #[arg(long, value_name = "PATH")]
+        fixture: Option<PathBuf>,
+        /// MCP server name.
+        #[arg(value_name = "SERVER_NAME")]
+        server_name: String,
     },
 }
 
@@ -390,6 +415,13 @@ fn run() -> Result<()> {
             MemoryCommand::Inspect { db } => print_memory_inspect(db),
             MemoryCommand::Search { db, query, limit } => print_memory_search(db, query, limit),
         },
+        Commands::Mcp { command } => match command {
+            McpCommand::Servers { fixture } => print_mcp_servers(fixture),
+            McpCommand::Config {
+                fixture,
+                server_name,
+            } => print_mcp_config(fixture, server_name),
+        },
         Commands::Sessions { command } => match command {
             SessionCommand::List { root } => print_sessions(root),
             SessionCommand::Prune {
@@ -434,7 +466,16 @@ where
 fn is_known_subcommand(arg: &str) -> bool {
     matches!(
         arg,
-        "run" | "ask" | "agents" | "models" | "tools" | "config" | "memory" | "sessions" | "tui"
+        "run"
+            | "ask"
+            | "agents"
+            | "models"
+            | "tools"
+            | "config"
+            | "memory"
+            | "mcp"
+            | "sessions"
+            | "tui"
     )
 }
 
@@ -928,6 +969,93 @@ fn print_tools(fixture: PathBuf, tool_type: Option<String>, id: Option<String>) 
         );
     }
     Ok(())
+}
+
+fn print_mcp_servers(fixture: Option<PathBuf>) -> Result<()> {
+    let mut servers = load_mcp_servers_or_embedded(fixture)?;
+    for server in &servers {
+        by_mcp::validate_server_config(&server.transport, &server.config)
+            .with_context(|| format!("invalid MCP config for server '{}'", server.name))?;
+    }
+    servers.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let projected_servers = servers
+        .iter()
+        .map(|server| {
+            serde_json::json!({
+                "name": server.name,
+                "connected": false,
+                "transport": server.transport,
+            })
+        })
+        .collect::<Vec<_>>();
+    let output = serde_json::json!({
+        "result": {
+            "servers": projected_servers,
+            "total": servers.len(),
+            "connected": 0,
+        }
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn print_mcp_config(fixture: Option<PathBuf>, server_name: String) -> Result<()> {
+    let servers = load_mcp_servers_or_embedded(fixture)?;
+    let server = servers
+        .into_iter()
+        .find(|server| server.name == server_name)
+        .with_context(|| format!("MCP server '{server_name}' not found in configuration"))?;
+    by_mcp::validate_server_config(&server.transport, &server.config)
+        .with_context(|| format!("invalid MCP config for server '{}'", server.name))?;
+
+    let output = serde_json::json!({
+        "result": {
+            "name": server.name,
+            "config": {
+                "transport": server.transport,
+                "config": server.config,
+                "enabled": server.enabled,
+                "auto-register-tools": server.auto_register_tools,
+            }
+        }
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn load_mcp_servers_or_embedded(
+    fixture: Option<PathBuf>,
+) -> Result<Vec<by_registry::McpServerDescriptor>> {
+    match fixture {
+        Some(path) => load_mcp_servers_fixture_path(path),
+        None => Ok(by_registry::load_embedded_oracle_registry()?.mcp_servers),
+    }
+}
+
+fn load_mcp_servers_fixture_path(path: PathBuf) -> Result<Vec<by_registry::McpServerDescriptor>> {
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read MCP fixture {}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .with_context(|| format!("failed to parse MCP fixture {}", path.display()))?;
+    let is_registry_object = value.as_object().is_some_and(|object| {
+        [
+            "mcpServers",
+            "mcp-servers",
+            "mcp_servers",
+            "tools",
+            "agents",
+            "models",
+        ]
+        .iter()
+        .any(|key| object.contains_key(*key))
+    });
+
+    if is_registry_object {
+        Ok(by_registry::load_registry_str(&raw)?.mcp_servers)
+    } else {
+        by_registry::load_mcp_servers_str(&raw)
+    }
 }
 
 fn model_id_with_region(model: &by_registry::ModelDescriptor) -> String {
