@@ -106,7 +106,14 @@ fi
 
 mkdir -p "$out_dir"
 project_dir="$fixture_home/project"
+fixture_bin="$fixture_home/bin"
 mkdir -p "$project_dir"
+mkdir -p "$fixture_bin"
+cat >"$fixture_bin/tmux" <<'TMUX'
+#!/bin/sh
+exit 0
+TMUX
+chmod +x "$fixture_bin/tmux"
 
 declare -a cases=(
   "top_help|--help"
@@ -116,6 +123,7 @@ declare -a cases=(
   "top_version_short|-V"
   "run_help|run --help"
   "run_resume_missing|run --resume missing"
+  "run_with_tmux_need_session|run --with-tmux"
   "ask_help|ask --help"
   "ask_missing_question|ask"
   "ask_missing_question_bedrock|ask --provider bedrock --model amazon.nova-lite-v1:0"
@@ -149,7 +157,10 @@ capture_case() {
   local status_file="$out_dir/$name.exitcode"
   local status=0
   local command=""
+  local env_prefix=""
   local arg escaped
+
+  printf -v env_prefix 'export PATH=%q:"$PATH"; unset TMUX; ' "$fixture_bin"
 
   if [[ -n "$runner_command" ]]; then
     command="$runner_command"
@@ -160,16 +171,20 @@ capture_case() {
     (
       cd "$native_root"
       HOME="$fixture_home" \
+      PATH="$fixture_bin:$PATH" \
+      TMUX= \
       CARGO_HOME="$cargo_home" \
       RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        bash -lc "$command" </dev/null
+        bash -lc "$env_prefix$command" </dev/null
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   else
     (
       cd "$native_root"
       HOME="$fixture_home" \
+      PATH="$fixture_bin:$PATH" \
+      TMUX= \
       CARGO_HOME="$cargo_home" \
       RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
