@@ -2503,6 +2503,25 @@ fn ask_dry_run_parses_legacy_provider_model_positional() {
 }
 
 #[test]
+fn ask_dry_run_removes_legacy_provider_model_from_any_positional() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "--dry-run",
+            "What is 2+2?",
+            "bedrock:amazon.nova-lite-v1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"bedrock\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"amazon.nova-lite-v1\"",
+        ))
+        .stdout(predicate::str::contains("\"text\": \"What is 2+2?\""));
+}
+
+#[test]
 fn ask_dry_run_keeps_bedrock_model_id_with_second_colon_as_question_text() {
     Command::cargo_bin("by-rs")
         .unwrap()
