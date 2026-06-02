@@ -394,6 +394,22 @@ fn bedrock_runtime_options_follow_clojure_region_and_profile_precedence() {
 }
 
 #[test]
+fn bedrock_runtime_options_use_aws_default_profile_when_aws_profile_is_absent() {
+    let options = resolve_bedrock_runtime_options(BedrockRuntimeInputs {
+        explicit_region: None,
+        catalog_region: None,
+        aws_region: None,
+        aws_default_region: None,
+        explicit_profile: None,
+        aws_profile: None,
+        aws_default_profile: Some("fallback".to_string()),
+    });
+
+    assert_eq!(options.region, default_bedrock_region());
+    assert_eq!(options.aws_profile.as_deref(), Some("fallback"));
+}
+
+#[test]
 fn bedrock_request_splits_system_cache_zones_and_keeps_last_user_cache_point() {
     let request = build_bedrock_request_with_cache_zones(
         &BedrockConfig {

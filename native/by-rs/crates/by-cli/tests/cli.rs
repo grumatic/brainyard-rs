@@ -2697,6 +2697,27 @@ fn ask_dry_run_resolves_bedrock_region_and_profile_from_environment() {
 }
 
 #[test]
+fn ask_dry_run_uses_aws_default_profile_when_aws_profile_is_absent() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .env_remove("AWS_PROFILE")
+        .env("AWS_DEFAULT_PROFILE", "fallback")
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"aws_profile\": \"fallback\""));
+}
+
+#[test]
 fn ask_dry_run_prefers_bedrock_catalog_region_pin_over_environment() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()
