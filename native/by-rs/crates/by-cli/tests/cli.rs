@@ -2357,6 +2357,27 @@ fn ask_rejects_dry_run_and_live_together() {
 }
 
 #[test]
+fn ask_live_rejects_non_bedrock_before_network() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "ask",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5",
+            "--live",
+            "What is 2+2?",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "by-rs ask currently supports provider 'bedrock' only",
+        ));
+}
+
+#[test]
 fn ask_dry_run_uses_config_defaults_when_provider_and_model_are_omitted() {
     let home = tempfile::tempdir().unwrap();
     let brainyard = home.path().join(".brainyard");

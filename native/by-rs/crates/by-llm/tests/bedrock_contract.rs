@@ -7,8 +7,9 @@ use aws_sdk_bedrockruntime::{
 };
 use by_llm::{
     build_bedrock_request, build_bedrock_request_with_cache_zones, default_bedrock_region,
-    project_bedrock_converse_output, reshape_bedrock_response, resolve_bedrock_runtime_options,
-    BedrockConfig, BedrockRuntimeInputs, CacheZone, ChatMessage,
+    project_bedrock_converse_output, project_bedrock_sdk_converse_request,
+    reshape_bedrock_response, resolve_bedrock_runtime_options, BedrockConfig,
+    BedrockConverseRequest, BedrockRuntimeInputs, BedrockRuntimeOptions, CacheZone, ChatMessage,
 };
 use serde_json::json;
 
@@ -72,6 +73,63 @@ fn bedrock_request_adds_cache_points_to_system_and_last_user_when_enabled() {
             "system": [{"text": "Stable instructions"}, {"cachePoint": {"type": "default"}}]
         })
     );
+}
+
+#[test]
+fn live_bedrock_sdk_request_projection_matches_contract_shape_without_network() {
+    let config = BedrockConfig {
+        model: "amazon.nova-lite-v1:0".to_string(),
+        temperature: Some(0.5),
+        max_tokens: Some(256),
+        prompt_cache: true,
+        drop_temperature: false,
+    };
+    let messages = vec![
+        ChatMessage::system("Preamble\n\nZone A\n\nTail"),
+        ChatMessage::user("What is next?"),
+    ];
+    let cache_zones = vec![CacheZone {
+        key: "a".to_string(),
+        text: "Zone A".to_string(),
+    }];
+
+    let dry_run_shape = build_bedrock_request_with_cache_zones(&config, &messages, &cache_zones);
+    let sdk_shape = project_bedrock_sdk_converse_request(&BedrockConverseRequest {
+        config,
+        runtime: BedrockRuntimeOptions {
+            region: "us-east-1".to_string(),
+            aws_profile: None,
+        },
+        messages,
+        cache_zones,
+    })
+    .unwrap();
+
+    assert_eq!(sdk_shape, dry_run_shape);
+}
+
+#[test]
+fn live_bedrock_sdk_request_validation_fails_before_network() {
+    let error = project_bedrock_sdk_converse_request(&BedrockConverseRequest {
+        config: BedrockConfig {
+            model: "amazon.nova-lite-v1:0".to_string(),
+            temperature: None,
+            max_tokens: None,
+            prompt_cache: false,
+            drop_temperature: false,
+        },
+        runtime: BedrockRuntimeOptions {
+            region: "us-east-1".to_string(),
+            aws_profile: None,
+        },
+        messages: vec![ChatMessage::new("tool", "not supported by Converse")],
+        cache_zones: Vec::new(),
+    })
+    .unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("unsupported Bedrock conversation role 'tool'"));
 }
 
 #[test]

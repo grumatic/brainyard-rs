@@ -67,6 +67,14 @@ pub struct ProviderRequestProjection {
     pub request: Value,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct BedrockSdkConverseRequestParts {
+    model_id: String,
+    messages: Vec<Message>,
+    system: Option<Vec<SystemContentBlock>>,
+    inference_config: Option<InferenceConfiguration>,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BedrockRuntimeInputs {
     pub explicit_region: Option<String>,
@@ -225,22 +233,18 @@ pub fn default_bedrock_region() -> &'static str {
 pub async fn converse_bedrock(request: BedrockConverseRequest) -> Result<BedrockConverseResponse> {
     let sdk_config = load_bedrock_sdk_config(&request.runtime).await;
     let client = Client::new(&sdk_config);
+    let sdk_request = build_bedrock_sdk_converse_request(&request)?;
 
     let mut builder = client
         .converse()
-        .model_id(request.config.model.clone())
-        .set_messages(Some(build_sdk_messages(
-            &request.config,
-            &request.messages,
-        )?));
+        .model_id(sdk_request.model_id)
+        .set_messages(Some(sdk_request.messages));
 
-    if let Some(system) =
-        build_sdk_system_blocks(&request.config, &request.messages, &request.cache_zones)?
-    {
+    if let Some(system) = sdk_request.system {
         builder = builder.set_system(Some(system));
     }
 
-    if let Some(inference) = build_sdk_inference_config(&request.config)? {
+    if let Some(inference) = sdk_request.inference_config {
         builder = builder.inference_config(inference);
     }
 
@@ -261,6 +265,11 @@ pub async fn converse_bedrock(request: BedrockConverseRequest) -> Result<Bedrock
         text,
         stop_reason,
     })
+}
+
+pub fn project_bedrock_sdk_converse_request(request: &BedrockConverseRequest) -> Result<Value> {
+    let sdk_request = build_bedrock_sdk_converse_request(request)?;
+    Ok(bedrock_sdk_converse_request_value(&sdk_request))
 }
 
 pub fn project_bedrock_converse_output(output: &AwsConverseOperationOutput) -> Value {
@@ -552,6 +561,17 @@ async fn load_bedrock_sdk_config(runtime: &BedrockRuntimeOptions) -> aws_config:
     loader.load().await
 }
 
+fn build_bedrock_sdk_converse_request(
+    request: &BedrockConverseRequest,
+) -> Result<BedrockSdkConverseRequestParts> {
+    Ok(BedrockSdkConverseRequestParts {
+        model_id: request.config.model.clone(),
+        messages: build_sdk_messages(&request.config, &request.messages)?,
+        system: build_sdk_system_blocks(&request.config, &request.messages, &request.cache_zones)?,
+        inference_config: build_sdk_inference_config(&request.config)?,
+    })
+}
+
 fn build_sdk_messages(config: &BedrockConfig, messages: &[ChatMessage]) -> Result<Vec<Message>> {
     let mut sdk_messages = messages
         .iter()
@@ -656,6 +676,83 @@ fn build_sdk_inference_config(config: &BedrockConfig) -> Result<Option<Inference
     } else {
         Ok(None)
     }
+}
+
+fn bedrock_sdk_converse_request_value(request: &BedrockSdkConverseRequestParts) -> Value {
+    let mut root = Map::new();
+    root.insert(
+        "modelId".to_string(),
+        Value::String(request.model_id.clone()),
+    );
+    root.insert(
+        "messages".to_string(),
+        Value::Array(request.messages.iter().map(message_input_value).collect()),
+    );
+
+    if let Some(inference) = &request.inference_config {
+        root.insert(
+            "inferenceConfig".to_string(),
+            Value::Object(inference_config_value(inference)),
+        );
+    }
+
+    if let Some(system) = &request.system {
+        root.insert(
+            "system".to_string(),
+            Value::Array(system.iter().filter_map(system_input_block_value).collect()),
+        );
+    }
+
+    Value::Object(root)
+}
+
+fn message_input_value(message: &Message) -> Value {
+    json!({
+        "role": message.role().as_str(),
+        "content": message.content().iter().filter_map(content_input_block_value).collect::<Vec<_>>(),
+    })
+}
+
+fn content_input_block_value(block: &ContentBlock) -> Option<Value> {
+    if let Ok(text) = block.as_text() {
+        return Some(json!({"text": text}));
+    }
+    if let Ok(cache_point) = block.as_cache_point() {
+        return Some(cache_point_value(cache_point));
+    }
+    None
+}
+
+fn system_input_block_value(block: &SystemContentBlock) -> Option<Value> {
+    if let Ok(text) = block.as_text() {
+        return Some(json!({"text": text}));
+    }
+    if let Ok(cache_point) = block.as_cache_point() {
+        return Some(cache_point_value(cache_point));
+    }
+    None
+}
+
+fn cache_point_value(cache_point: &CachePointBlock) -> Value {
+    json!({"cachePoint": {"type": cache_point.r#type().as_str()}})
+}
+
+fn inference_config_value(inference: &InferenceConfiguration) -> Map<String, Value> {
+    let mut value = Map::new();
+    if let Some(temperature) = inference.temperature() {
+        value.insert("temperature".to_string(), json!(temperature));
+    }
+    if let Some(max_tokens) = inference.max_tokens() {
+        value.insert("maxTokens".to_string(), json!(max_tokens));
+    }
+    if let Some(top_p) = inference.top_p() {
+        value.insert("topP".to_string(), json!(top_p));
+    }
+    let stop_sequences = inference.stop_sequences();
+    if !stop_sequences.is_empty() {
+        value.insert("stopSequences".to_string(), json!(stop_sequences));
+    }
+    value
 }
 
 fn message_output_value(message: &Message) -> Value {
