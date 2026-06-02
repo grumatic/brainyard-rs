@@ -278,6 +278,30 @@ enum McpCommand {
         #[arg(long = "request-id", default_value_t = 1)]
         request_id: u64,
     },
+    /// Project a resources/list request or response fixture.
+    Resources {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Optional resources/list JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: Option<PathBuf>,
+        /// JSON-RPC request id.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
+    /// Project a prompts/list request or response fixture.
+    Prompts {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Optional prompts/list JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: Option<PathBuf>,
+        /// JSON-RPC request id.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
     /// Project tools/list into auto-registered agent tool descriptors.
     RegisteredTools {
         /// MCP server name that produced the tools/list response.
@@ -501,6 +525,16 @@ fn run() -> Result<()> {
                 fixture_response,
                 request_id,
             } => print_mcp_tools(server_name, fixture_response, request_id),
+            McpCommand::Resources {
+                server_name,
+                fixture_response,
+                request_id,
+            } => print_mcp_resources(server_name, fixture_response, request_id),
+            McpCommand::Prompts {
+                server_name,
+                fixture_response,
+                request_id,
+            } => print_mcp_prompts(server_name, fixture_response, request_id),
             McpCommand::RegisteredTools {
                 server_name,
                 fixture_response,
@@ -1160,6 +1194,62 @@ fn print_mcp_tools(server_name: String, fixture_response: PathBuf, request_id: u
     Ok(())
 }
 
+fn print_mcp_resources(
+    server_name: String,
+    fixture_response: Option<PathBuf>,
+    request_id: u64,
+) -> Result<()> {
+    if let Some(fixture_response) = fixture_response {
+        let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+            format!(
+                "failed to read MCP resources/list response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+            format!(
+                "failed to project MCP resources/list response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let output = by_mcp::project_server_resources_command_result(&server_name, result)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let output = by_mcp::list_resources_request(request_id);
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
+fn print_mcp_prompts(
+    server_name: String,
+    fixture_response: Option<PathBuf>,
+    request_id: u64,
+) -> Result<()> {
+    if let Some(fixture_response) = fixture_response {
+        let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+            format!(
+                "failed to read MCP prompts/list response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+            format!(
+                "failed to project MCP prompts/list response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let output = by_mcp::project_server_prompts_command_result(&server_name, result)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let output = by_mcp::list_prompts_request(request_id);
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
 fn print_mcp_registered_tools(
     server_name: String,
     fixture_response: PathBuf,
@@ -1312,6 +1402,8 @@ fn extract_mcp_fixture_result(raw: &str, request_id: u64) -> Result<serde_json::
     let value: serde_json::Value =
         serde_json::from_str(raw).context("invalid MCP response fixture JSON")?;
     if value.get("tools").is_some()
+        || value.get("resources").is_some()
+        || value.get("prompts").is_some()
         || value.get("content").is_some()
         || value.get("contents").is_some()
         || value.get("messages").is_some()

@@ -328,6 +328,29 @@ pub fn project_tools_list_command_result(tools: &[McpTool]) -> Value {
     })
 }
 
+pub fn project_server_resources_command_result(
+    server_name: &str,
+    resources: Value,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "resources": resources,
+        }
+    }))
+}
+
+pub fn project_server_prompts_command_result(server_name: &str, prompts: Value) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "prompts": prompts,
+        }
+    }))
+}
+
 pub fn mcp_input_schema_to_malli(schema: &Value) -> Value {
     let properties = object_field(schema, "properties")
         .and_then(Value::as_object)

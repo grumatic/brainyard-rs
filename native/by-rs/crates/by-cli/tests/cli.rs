@@ -573,6 +573,126 @@ fn mcp_tools_hidden_command_accepts_raw_result_fixture() {
 }
 
 #[test]
+fn mcp_resources_hidden_command_projects_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "resources",
+            "--server-name",
+            "filesystem",
+            "--request-id",
+            "43",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["jsonrpc"], "2.0");
+    assert_eq!(value["id"], 43);
+    assert_eq!(value["method"], "resources/list");
+    assert_eq!(value["params"], serde_json::json!({}));
+}
+
+#[test]
+fn mcp_resources_hidden_command_projects_clojure_server_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("resources-list-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":44,"result":{"resources":[{"uri":"file:///tmp/a.txt","name":"a.txt","mimeType":"text/plain"}]}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "resources",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "44"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "filesystem");
+    assert_eq!(
+        value["result"]["resources"]["resources"][0]["uri"],
+        "file:///tmp/a.txt"
+    );
+    assert_eq!(
+        value["result"]["resources"]["resources"][0]["mimeType"],
+        "text/plain"
+    );
+}
+
+#[test]
+fn mcp_prompts_hidden_command_projects_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "prompts",
+            "--server-name",
+            "linear",
+            "--request-id",
+            "45",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["jsonrpc"], "2.0");
+    assert_eq!(value["id"], 45);
+    assert_eq!(value["method"], "prompts/list");
+    assert_eq!(value["params"], serde_json::json!({}));
+}
+
+#[test]
+fn mcp_prompts_hidden_command_projects_clojure_server_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("prompts-list-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":46,"result":{"prompts":[{"name":"summarize","description":"Summarize work","arguments":[{"name":"topic","required":true}]}]}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "prompts",
+            "--server-name",
+            "linear",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "46"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "linear");
+    assert_eq!(
+        value["result"]["prompts"]["prompts"][0]["name"],
+        "summarize"
+    );
+    assert_eq!(
+        value["result"]["prompts"]["prompts"][0]["arguments"][0]["name"],
+        "topic"
+    );
+}
+
+#[test]
 fn mcp_registered_tools_hidden_command_projects_clojure_auto_registration_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("tools-list-response.json");
