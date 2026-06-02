@@ -2295,6 +2295,43 @@ fn memory_search_uses_default_user_db_path_from_environment_without_project_writ
 }
 
 #[test]
+fn memory_search_uses_default_user_db_path_from_project_dotenv() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let nested = project.path().join("nested/work");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(project.path().join(".env"), "BY_USER_ID=dotenv-user\n").unwrap();
+
+    let db_path = home.path().join(".brainyard/memory/dotenv-user.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let conn = Connection::open(&db_path).unwrap();
+    create_memory_schema(&conn);
+    conn.execute(
+        "INSERT INTO episodes (session_id, user_id, episode_type, role, content)
+         VALUES ('s1', 'dotenv-user', 'conversation', 'assistant', 'dotenv default-path note')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(&nested)
+        .env("HOME", home.path())
+        .env_remove("BY_USER_ID")
+        .env_remove("BY_ENV_FILE")
+        .env_remove("BY_NO_DOTENV")
+        .args(["memory", "search", "--query", "dotenv"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "l2\tconversation\tdotenv default-path note",
+        ));
+
+    assert!(!project.path().join(".brainyard").exists());
+}
+
+#[test]
 fn memory_inspect_reports_schema_and_counts_without_writing() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("memory.db");
