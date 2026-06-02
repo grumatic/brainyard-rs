@@ -36,8 +36,12 @@ native/by-rs/scripts/capture-rust-cli-snapshots.sh \
 
 native/by-rs/scripts/compare-cli-snapshots.py \
   --clojure native/by-rs/target/cli-snapshots/clojure \
-  --rust native/by-rs/target/cli-snapshots/rust
+  --rust native/by-rs/target/cli-snapshots/rust \
+  --ignore-version
 ```
+
+`--ignore-version` is useful for local runner comparisons because Clojure and
+Rust snapshots can be stamped from different build artifacts.
 
 The comparison script reports current parity gaps without failing by default;
 pass `--strict` when a case is ready to become a gated compatibility check.

@@ -12,6 +12,7 @@ import argparse
 import difflib
 import json
 import pathlib
+import re
 import sys
 from dataclasses import dataclass
 
@@ -42,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         help="Skip this case name; may be passed multiple times",
     )
     parser.add_argument("--strict", action="store_true", help="Exit non-zero when compared cases differ")
+    parser.add_argument(
+        "--ignore-version",
+        action="store_true",
+        help="Normalize build-version strings before comparing outputs",
+    )
     parser.add_argument("--diff", action="store_true", help="Print combined-output unified diffs")
     parser.add_argument("--diff-lines", type=int, default=120, help="Maximum diff lines per case")
     return parser.parse_args()
@@ -75,21 +81,63 @@ def read_text(root: pathlib.Path, relative: str) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def normalize(text: str) -> str:
-    lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+TOP_VERSION_RE = re.compile(r"^(by)\s+v\S+$")
+
+
+def scrub_version_lines(lines: list[str]) -> list[str]:
+    scrub_next_payload = False
+    scrubbed = []
+    for line in lines:
+        stripped = line.strip()
+        if scrub_next_payload and stripped:
+            indent = line[: len(line) - len(line.lstrip())]
+            scrubbed.append(f"{indent}<version>")
+            scrub_next_payload = False
+            continue
+
+        match = TOP_VERSION_RE.match(line)
+        if match:
+            scrubbed.append(f"{match.group(1)} <version>")
+        else:
+            scrubbed.append(line)
+
+        scrub_next_payload = stripped == "VERSION:"
+    return scrubbed
+
+
+def normalize(text: str, *, ignore_version: bool = False) -> str:
+    lines = [
+        line.rstrip()
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+    if ignore_version:
+        lines = scrub_version_lines(lines)
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines)
 
 
-def combined(root: pathlib.Path, case: SnapshotCase) -> str:
-    return normalize(read_text(root, case.stdout) + read_text(root, case.stderr))
+def combined(root: pathlib.Path, case: SnapshotCase, *, ignore_version: bool = False) -> str:
+    return normalize(
+        read_text(root, case.stdout) + read_text(root, case.stderr),
+        ignore_version=ignore_version,
+    )
 
 
-def stream_exact(root_left: pathlib.Path, left: SnapshotCase, root_right: pathlib.Path, right: SnapshotCase, stream: str) -> bool:
+def stream_exact(
+    root_left: pathlib.Path,
+    left: SnapshotCase,
+    root_right: pathlib.Path,
+    right: SnapshotCase,
+    stream: str,
+    *,
+    ignore_version: bool = False,
+) -> bool:
     left_file = left.stdout if stream == "stdout" else left.stderr
     right_file = right.stdout if stream == "stdout" else right.stderr
-    return normalize(read_text(root_left, left_file)) == normalize(read_text(root_right, right_file))
+    return normalize(read_text(root_left, left_file), ignore_version=ignore_version) == normalize(
+        read_text(root_right, right_file), ignore_version=ignore_version
+    )
 
 
 def yes_no(value: bool) -> str:
@@ -122,9 +170,27 @@ def main() -> int:
 
         compared += 1
         exit_ok = clj.exit_code == rust.exit_code
-        combined_ok = combined(args.clojure, clj) == combined(args.rust, rust)
-        stdout_ok = stream_exact(args.clojure, clj, args.rust, rust, "stdout")
-        stderr_ok = stream_exact(args.clojure, clj, args.rust, rust, "stderr")
+        combined_ok = combined(
+            args.clojure,
+            clj,
+            ignore_version=args.ignore_version,
+        ) == combined(args.rust, rust, ignore_version=args.ignore_version)
+        stdout_ok = stream_exact(
+            args.clojure,
+            clj,
+            args.rust,
+            rust,
+            "stdout",
+            ignore_version=args.ignore_version,
+        )
+        stderr_ok = stream_exact(
+            args.clojure,
+            clj,
+            args.rust,
+            rust,
+            "stderr",
+            ignore_version=args.ignore_version,
+        )
         if not exit_ok or not combined_ok:
             failures += 1
         print(
@@ -133,15 +199,21 @@ def main() -> int:
         )
 
         if args.diff and not combined_ok:
-            left = combined(args.clojure, clj).splitlines()
-            right = combined(args.rust, rust).splitlines()
-            diff = list(difflib.unified_diff(
-                left,
-                right,
-                fromfile=f"clojure/{name}",
-                tofile=f"rust/{name}",
-                lineterm="",
-            ))
+            left = combined(
+                args.clojure,
+                clj,
+                ignore_version=args.ignore_version,
+            ).splitlines()
+            right = combined(args.rust, rust, ignore_version=args.ignore_version).splitlines()
+            diff = list(
+                difflib.unified_diff(
+                    left,
+                    right,
+                    fromfile=f"clojure/{name}",
+                    tofile=f"rust/{name}",
+                    lineterm="",
+                )
+            )
             for line in diff[: args.diff_lines]:
                 print(line)
             if len(diff) > args.diff_lines:
