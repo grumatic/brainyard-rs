@@ -1519,6 +1519,26 @@ fn print_mcp_call_tool(
 ) -> Result<()> {
     let tool_args_json: serde_json::Value =
         serde_json::from_str(&tool_args).context("failed to parse --tool-args JSON")?;
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_tool_call_validation_error_command_result(
+            &server_name,
+            &tool_name,
+            tool_args_json,
+            "server-name is required",
+        )?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+    if tool_name.trim().is_empty() {
+        let output = by_mcp::project_tool_call_validation_error_command_result(
+            &server_name,
+            &tool_name,
+            tool_args_json,
+            "tool-name is required",
+        )?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
     let calls = by_mcp::tool_calls_from_value(&serde_json::json!([
         {
             "server-name": server_name,

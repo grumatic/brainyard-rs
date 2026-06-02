@@ -1147,6 +1147,77 @@ fn mcp_call_tool_hidden_command_projects_request_without_network() {
 }
 
 #[test]
+fn mcp_call_tool_hidden_command_projects_blank_server_to_validation_result() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "call-tool",
+            "--server-name",
+            "",
+            "--tool-name",
+            "read_file",
+            "--tool-args",
+            r#"{"path":"/tmp/a.txt"}"#,
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 1);
+    assert_eq!(value["result"]["tool-results"][0]["server-name"], "");
+    assert_eq!(value["result"]["tool-results"][0]["tool-name"], "read_file");
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-args"]["path"],
+        "/tmp/a.txt"
+    );
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["error"],
+        "server-name is required"
+    );
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["success"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
+fn mcp_call_tool_hidden_command_projects_blank_tool_to_validation_result() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "call-tool",
+            "--server-name",
+            "filesystem",
+            "--tool-name",
+            "",
+            "--tool-args",
+            r#"{"path":"/tmp/a.txt"}"#,
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 1);
+    assert_eq!(
+        value["result"]["tool-results"][0]["server-name"],
+        "filesystem"
+    );
+    assert_eq!(value["result"]["tool-results"][0]["tool-name"], "");
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["error"],
+        "tool-name is required"
+    );
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["success"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
 fn mcp_call_tool_hidden_command_projects_response_fixture_to_command_result() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("tools-call-response.json");

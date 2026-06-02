@@ -670,6 +670,30 @@ pub fn project_tool_call_errors_command_result(
     }))
 }
 
+pub fn project_tool_call_validation_error_command_result(
+    server_name: &str,
+    tool_name: &str,
+    tool_args: Value,
+    error: &str,
+) -> Result<Value> {
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "result": {
+            "tool-results": [
+                {
+                    "server-name": server_name,
+                    "tool-name": tool_name,
+                    "tool-args": tool_args,
+                    "tool-result": {
+                        "error": error,
+                    }
+                }
+            ],
+            "total": 1,
+        }
+    }))
+}
+
 pub fn project_read_resource_command_result(
     server_name: &str,
     resource_uri: &str,

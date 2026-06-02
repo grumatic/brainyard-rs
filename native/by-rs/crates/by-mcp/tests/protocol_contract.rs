@@ -14,10 +14,11 @@ use by_mcp::{
     project_server_prompts_command_result, project_server_prompts_error_command_result,
     project_server_resources_command_result, project_server_resources_error_command_result,
     project_server_unhealthy_command_result, project_tool_call_errors_command_result,
-    project_tool_calls_command_result, project_tools_list_command_result, read_resource_request,
-    registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
-    tool_call_request_from_call, tool_calls_from_value, tools_from_list_result,
-    validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
+    project_tool_call_validation_error_command_result, project_tool_calls_command_result,
+    project_tools_list_command_result, read_resource_request, registered_tool_id,
+    safe_clojure_symbol_name, stdio_initialize_request, tool_call_request_from_call,
+    tool_calls_from_value, tools_from_list_result, validate_server_config, CLIENT_NAME,
+    CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
 use serde_json::json;
@@ -497,7 +498,39 @@ fn mcp_tool_call_projection_matches_clojure_command_shape() {
         })
     );
 
+    assert_eq!(
+        project_tool_call_validation_error_command_result(
+            "",
+            "read_file",
+            json!({"path": "/tmp/a.txt"}),
+            "server-name is required"
+        )
+        .unwrap(),
+        json!({
+            "result": {
+                "tool-results": [
+                    {
+                        "server-name": "",
+                        "tool-name": "read_file",
+                        "tool-args": {"path": "/tmp/a.txt"},
+                        "tool-result": {
+                            "error": "server-name is required"
+                        }
+                    }
+                ],
+                "total": 1
+            }
+        })
+    );
+
     assert!(project_tool_call_errors_command_result(&calls, &[]).is_err());
+    assert!(project_tool_call_validation_error_command_result(
+        "filesystem",
+        "read_file",
+        json!({}),
+        ""
+    )
+    .is_err());
 }
 
 #[test]
