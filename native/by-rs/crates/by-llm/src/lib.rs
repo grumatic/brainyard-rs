@@ -78,6 +78,7 @@ struct BedrockSdkConverseRequestParts {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BedrockRuntimeInputs {
     pub explicit_region: Option<String>,
+    pub catalog_region: Option<String>,
     pub aws_region: Option<String>,
     pub aws_default_region: Option<String>,
     pub explicit_profile: Option<String>,
@@ -214,6 +215,7 @@ pub fn resolve_bedrock_runtime_options(inputs: BedrockRuntimeInputs) -> BedrockR
     BedrockRuntimeOptions {
         region: first_non_blank([
             inputs.explicit_region,
+            inputs.catalog_region,
             inputs.aws_region,
             inputs.aws_default_region,
         ])

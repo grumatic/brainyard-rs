@@ -2568,6 +2568,33 @@ fn ask_dry_run_resolves_bedrock_region_and_profile_from_environment() {
 }
 
 #[test]
+fn ask_dry_run_prefers_bedrock_catalog_region_pin_over_environment() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .env("AWS_REGION", "ap-northeast-2")
+        .env("AWS_DEFAULT_REGION", "eu-west-1")
+        .env_remove("AWS_PROFILE")
+        .env_remove("AWS_DEFAULT_PROFILE")
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "openai.gpt-oss-120b-1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["region"], "us-east-1");
+    assert_eq!(value["request"]["modelId"], "openai.gpt-oss-120b-1:0");
+}
+
+#[test]
 fn ask_dry_run_explicit_region_and_profile_win_over_environment() {
     Command::cargo_bin("by-rs")
         .unwrap()

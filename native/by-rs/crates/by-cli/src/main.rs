@@ -1020,8 +1020,10 @@ fn print_ask(args: AskRequest) -> Result<()> {
         bail!("by-rs ask currently supports provider 'bedrock' only");
     }
 
+    let catalog_region = bedrock_catalog_region(&model)?;
     let runtime = by_llm::resolve_bedrock_runtime_options(by_llm::BedrockRuntimeInputs {
         explicit_region: args.region,
+        catalog_region,
         aws_region: by_config::process_env_or_dotenv(&dotenv, "AWS_REGION"),
         aws_default_region: by_config::process_env_or_dotenv(&dotenv, "AWS_DEFAULT_REGION"),
         explicit_profile: args.aws_profile,
@@ -1077,6 +1079,14 @@ fn print_missing_ask_question_and_exit() -> ! {
     println!("Error: question argument is required.");
     println!("Usage: by ask [options] QUESTION");
     std::process::exit(1);
+}
+
+fn bedrock_catalog_region(model: &str) -> Result<Option<String>> {
+    Ok(by_registry::load_embedded_oracle_registry()?
+        .models
+        .into_iter()
+        .find(|entry| entry.provider == "bedrock" && entry.id == model)
+        .and_then(|entry| entry.region))
 }
 
 fn resolve_ask_positionals(

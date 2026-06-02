@@ -342,6 +342,7 @@ fn live_bedrock_output_projection_matches_dry_run_response_shape() {
 fn bedrock_runtime_options_follow_clojure_region_and_profile_precedence() {
     let options = resolve_bedrock_runtime_options(BedrockRuntimeInputs {
         explicit_region: Some("ap-northeast-2".to_string()),
+        catalog_region: Some("us-east-1".to_string()),
         aws_region: Some("us-west-2".to_string()),
         aws_default_region: Some("eu-west-1".to_string()),
         explicit_profile: Some("explicit".to_string()),
@@ -354,6 +355,20 @@ fn bedrock_runtime_options_follow_clojure_region_and_profile_precedence() {
 
     let options = resolve_bedrock_runtime_options(BedrockRuntimeInputs {
         explicit_region: None,
+        catalog_region: Some("us-east-1".to_string()),
+        aws_region: Some("ap-northeast-2".to_string()),
+        aws_default_region: Some("eu-west-1".to_string()),
+        explicit_profile: None,
+        aws_profile: None,
+        aws_default_profile: None,
+    });
+
+    assert_eq!(options.region, "us-east-1");
+    assert_eq!(options.aws_profile, None);
+
+    let options = resolve_bedrock_runtime_options(BedrockRuntimeInputs {
+        explicit_region: None,
+        catalog_region: None,
         aws_region: Some("us-west-2".to_string()),
         aws_default_region: Some("eu-west-1".to_string()),
         explicit_profile: None,
@@ -366,6 +381,7 @@ fn bedrock_runtime_options_follow_clojure_region_and_profile_precedence() {
 
     let options = resolve_bedrock_runtime_options(BedrockRuntimeInputs {
         explicit_region: Some("   ".to_string()),
+        catalog_region: Some("  ".to_string()),
         aws_region: None,
         aws_default_region: None,
         explicit_profile: Some("".to_string()),
