@@ -2175,7 +2175,7 @@ fn prune_session(
     };
     let target = positional_session_id
         .or(session_id)
-        .context("Usage: by-rs sessions prune [--root PATH] <session-id>")?;
+        .context("Usage: by sessions prune <session-id>")?;
 
     if by_persist::delete_session_dir(&root, &target)? {
         println!("Deleted session: {target}");

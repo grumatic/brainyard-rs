@@ -340,6 +340,23 @@ fn sessions_prune_reports_missing_session_without_creating_it() {
 }
 
 #[test]
+fn sessions_prune_without_session_id_matches_clojure_usage() {
+    let root = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["sessions", "prune", "--root"])
+        .arg(root.path())
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "Usage: by sessions prune <session-id>",
+        ))
+        .stderr(predicate::str::contains("by-rs sessions prune").not());
+}
+
+#[test]
 fn models_command_filters_by_provider() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("registry.json");
