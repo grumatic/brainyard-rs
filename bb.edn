@@ -981,6 +981,30 @@
   {:doc "Run Rust port clippy with warnings denied"
    :task (shell {:dir "native/by-rs"} "cargo" "clippy" "--workspace" "--all-targets" "--" "-D" "warnings")}
 
+  by-rs:oracle
+  {:doc "Refresh Rust port oracle fixtures from the current Clojure runtime"
+   :task (shell "native/by-rs/scripts/export-clojure-oracle.sh")}
+
+  by-rs:oracle:check
+  {:doc "Refresh Rust port oracle fixtures and fail if the committed fixtures drift"
+   :task (do
+           (shell "native/by-rs/scripts/export-clojure-oracle.sh")
+           (shell "git" "diff" "--exit-code" "--" "native/by-rs/fixtures/oracle"))}
+
+  by-rs:cli-snapshots
+  {:doc "Capture Clojure/Rust read-only CLI snapshots and compare them strictly"
+   :task (do
+           (shell "native/by-rs/scripts/capture-clojure-cli-snapshots.sh")
+           (shell "native/by-rs/scripts/capture-rust-cli-snapshots.sh")
+           (shell "python3"
+                  "native/by-rs/scripts/compare-cli-snapshots.py"
+                  "--clojure" "native/by-rs/target/cli-snapshots/clojure"
+                  "--rust" "native/by-rs/target/cli-snapshots/rust"
+                  "--strict"
+                  "--ignore-version"
+                  "--diff"
+                  "--diff-lines" "80"))}
+
   by-rs:verify
   {:doc "Run Rust port fmt check, clippy, and workspace tests"
    :task (do
