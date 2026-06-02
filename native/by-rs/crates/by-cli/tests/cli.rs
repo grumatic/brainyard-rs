@@ -41,6 +41,72 @@ fn run_help_matches_clojure_command_surface() {
 }
 
 #[test]
+fn no_args_defaults_to_run_command() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("Usage:").not());
+}
+
+#[test]
+fn root_level_run_flags_are_routed_to_run_command() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "--inline",
+            "--no-inline",
+            "--verbose",
+            "--no-verbose",
+            "--with-tmux",
+            "--no-with-tmux",
+            "--select-resume",
+            "--no-select-resume",
+            "--new",
+            "--no-new",
+            "--max-iterations",
+            "3",
+            "--agent",
+            "coact-agent",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+        ])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("unexpected argument").not());
+}
+
+#[test]
+fn bare_agent_id_is_routed_to_run_command() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .arg("coact-agent")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("unrecognized subcommand").not());
+}
+
+#[test]
+fn run_accepts_bare_resume_flag_like_clojure() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["run", "--resume"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("a value is required").not());
+}
+
+#[test]
 fn agents_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()

@@ -18,7 +18,67 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Start interactive TUI agent session (default).
-    Run,
+    Run {
+        /// Agent ID.
+        #[arg(long, short = 'a', default_value = "coact-agent", value_name = "ID")]
+        agent: String,
+        /// LM provider.
+        #[arg(
+            long,
+            short = 'p',
+            default_value = "claude-code",
+            value_name = "PROVIDER"
+        )]
+        provider: String,
+        /// Model name override.
+        #[arg(long, short = 'm', value_name = "MODEL")]
+        model: Option<String>,
+        /// Inline mode (no alt screen).
+        #[arg(long, short = 'i', action = ArgAction::SetTrue)]
+        inline: bool,
+        /// Disable inline mode.
+        #[arg(long = "no-inline", action = ArgAction::SetTrue, hide = true)]
+        no_inline: bool,
+        /// Verbose output.
+        #[arg(long, short = 'v', action = ArgAction::SetTrue)]
+        verbose: bool,
+        /// Disable verbose output.
+        #[arg(long = "no-verbose", action = ArgAction::SetTrue, hide = true)]
+        no_verbose: bool,
+        /// Require tmux side panes / popups.
+        #[arg(long = "with-tmux", action = ArgAction::SetTrue)]
+        with_tmux: bool,
+        /// Disable required tmux side panes / popups.
+        #[arg(long = "no-with-tmux", action = ArgAction::SetTrue, hide = true)]
+        no_with_tmux: bool,
+        /// Max agent iterations.
+        #[arg(long, short = 'n', value_name = "N")]
+        max_iterations: Option<usize>,
+        /// Resume a persisted session; bare --resume means latest.
+        #[arg(
+            long,
+            short = 'r',
+            value_name = "ID",
+            num_args = 0..=1,
+            default_missing_value = "--by-resume-latest--"
+        )]
+        resume: Option<String>,
+        /// Pick a persisted session to resume from an interactive menu.
+        #[arg(long = "select-resume", action = ArgAction::SetTrue)]
+        select_resume: bool,
+        /// Disable interactive resume selection.
+        #[arg(long = "no-select-resume", action = ArgAction::SetTrue, hide = true)]
+        no_select_resume: bool,
+        /// Deprecated no-op; sessions start fresh by default.
+        #[arg(long = "new", action = ArgAction::SetTrue)]
+        new: bool,
+        /// Disable deprecated new-session flag.
+        #[arg(long = "no-new", action = ArgAction::SetTrue, hide = true)]
+        no_new: bool,
+        /// Bare agent id or legacy provider:model token.
+        #[arg(value_name = "ARG", num_args = 0..)]
+        positional: Vec<String>,
+    },
     /// Ask a one-shot question. Bedrock supports dry-run shaping or explicit live calls.
     Ask {
         /// Agent ID. Reserved for later full agent execution parity.
@@ -231,9 +291,26 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(normalize_default_run_args(std::env::args()));
     match cli.command {
-        Commands::Run => {
+        Commands::Run {
+            agent: _agent,
+            provider: _provider,
+            model: _model,
+            inline: _inline,
+            no_inline: _no_inline,
+            verbose: _verbose,
+            no_verbose: _no_verbose,
+            with_tmux: _with_tmux,
+            no_with_tmux: _no_with_tmux,
+            max_iterations: _max_iterations,
+            resume: _resume,
+            select_resume: _select_resume,
+            no_select_resume: _no_select_resume,
+            new: _new,
+            no_new: _no_new,
+            positional: _positional,
+        } => {
             bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
         }
         Commands::Ask {
@@ -318,6 +395,35 @@ fn run() -> Result<()> {
     }
 }
 
+fn normalize_default_run_args<I>(args: I) -> Vec<String>
+where
+    I: IntoIterator,
+    I::Item: Into<String>,
+{
+    let mut args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let Some(first_user_arg) = args.get(1) else {
+        args.push("run".to_string());
+        return args;
+    };
+
+    if is_known_subcommand(first_user_arg)
+        || is_help_flag(first_user_arg)
+        || is_version_flag(first_user_arg)
+    {
+        return args;
+    }
+
+    args.insert(1, "run".to_string());
+    args
+}
+
+fn is_known_subcommand(arg: &str) -> bool {
+    matches!(
+        arg,
+        "run" | "ask" | "agents" | "models" | "tools" | "config" | "memory" | "sessions" | "tui"
+    )
+}
+
 fn print_compat_help_if_requested<I>(args: I) -> bool
 where
     I: IntoIterator,
@@ -371,6 +477,10 @@ where
 
 fn is_help_flag(flag: &str) -> bool {
     matches!(flag, "--help" | "-h" | "-?")
+}
+
+fn is_version_flag(flag: &str) -> bool {
+    matches!(flag, "--version" | "-V")
 }
 
 fn top_level_help() -> String {
