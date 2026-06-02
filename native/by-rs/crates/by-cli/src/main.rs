@@ -1266,6 +1266,18 @@ fn print_mcp_info(server_name: String, fixture_response: PathBuf, request_id: u6
             fixture_response.display()
         )
     })?;
+    if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+        .with_context(|| {
+            format!(
+                "failed to project MCP initialize response fixture {}",
+                fixture_response.display()
+            )
+        })?
+    {
+        let output = by_mcp::project_server_info_error_command_result(&server_name, &error)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
     let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
         format!(
             "failed to project MCP initialize response fixture {}",
@@ -1288,6 +1300,19 @@ fn print_mcp_capabilities(
             fixture_response.display()
         )
     })?;
+    if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+        .with_context(|| {
+            format!(
+                "failed to project MCP capabilities response fixture {}",
+                fixture_response.display()
+            )
+        })?
+    {
+        let output =
+            by_mcp::project_server_capabilities_error_command_result(&server_name, &error)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
     let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
         format!(
             "failed to project MCP capabilities response fixture {}",
@@ -1393,6 +1418,19 @@ fn print_mcp_resources(
                 fixture_response.display()
             )
         })?;
+        if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+            .with_context(|| {
+                format!(
+                    "failed to project MCP resources/list response fixture {}",
+                    fixture_response.display()
+                )
+            })?
+        {
+            let output =
+                by_mcp::project_server_resources_error_command_result(&server_name, &error)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            return Ok(());
+        }
         let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
             format!(
                 "failed to project MCP resources/list response fixture {}",
@@ -1421,6 +1459,18 @@ fn print_mcp_prompts(
                 fixture_response.display()
             )
         })?;
+        if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+            .with_context(|| {
+                format!(
+                    "failed to project MCP prompts/list response fixture {}",
+                    fixture_response.display()
+                )
+            })?
+        {
+            let output = by_mcp::project_server_prompts_error_command_result(&server_name, &error)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            return Ok(());
+        }
         let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
             format!(
                 "failed to project MCP prompts/list response fixture {}",

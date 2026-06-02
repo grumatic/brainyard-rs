@@ -368,6 +368,17 @@ pub fn project_server_resources_command_result(
     }))
 }
 
+pub fn project_server_resources_error_command_result(
+    server_name: &str,
+    error: &str,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to list resources for '{server_name}': {error}")
+    }))
+}
+
 pub fn project_server_prompts_command_result(server_name: &str, prompts: Value) -> Result<Value> {
     ensure_nonblank(server_name, "server_name")?;
     Ok(json!({
@@ -375,6 +386,17 @@ pub fn project_server_prompts_command_result(server_name: &str, prompts: Value) 
             "name": server_name,
             "prompts": prompts,
         }
+    }))
+}
+
+pub fn project_server_prompts_error_command_result(
+    server_name: &str,
+    error: &str,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to list prompts for '{server_name}': {error}")
     }))
 }
 
@@ -388,6 +410,14 @@ pub fn project_server_info_command_result(server_name: &str, server_info: Value)
     }))
 }
 
+pub fn project_server_info_error_command_result(server_name: &str, error: &str) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to get server info for '{server_name}': {error}")
+    }))
+}
+
 pub fn project_server_capabilities_command_result(
     server_name: &str,
     capabilities: Value,
@@ -398,6 +428,17 @@ pub fn project_server_capabilities_command_result(
             "name": server_name,
             "capabilities": capabilities,
         }
+    }))
+}
+
+pub fn project_server_capabilities_error_command_result(
+    server_name: &str,
+    error: &str,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to get capabilities for '{server_name}': {error}")
     }))
 }
 

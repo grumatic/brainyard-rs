@@ -9,8 +9,10 @@ use by_mcp::{
     project_lifecycle_command_result, project_read_resource_command_result,
     project_read_resource_error_command_result, project_registered_tool_descriptors,
     project_registered_tools_command_result, project_server_capabilities_command_result,
-    project_server_health_command_result, project_server_info_command_result,
-    project_server_prompts_command_result, project_server_resources_command_result,
+    project_server_capabilities_error_command_result, project_server_health_command_result,
+    project_server_info_command_result, project_server_info_error_command_result,
+    project_server_prompts_command_result, project_server_prompts_error_command_result,
+    project_server_resources_command_result, project_server_resources_error_command_result,
     project_server_unhealthy_command_result, project_tool_call_errors_command_result,
     project_tool_calls_command_result, project_tools_list_command_result, read_resource_request,
     registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
@@ -523,6 +525,11 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     );
 
     assert_eq!(
+        project_server_info_error_command_result("filesystem", "info failed").unwrap(),
+        json!({"error": "Failed to get server info for 'filesystem': info failed"})
+    );
+
+    assert_eq!(
         project_server_capabilities_command_result(
             "filesystem",
             json!({"resources": {}, "tools": {}})
@@ -533,6 +540,14 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
                 "name": "filesystem",
                 "capabilities": {"resources": {}, "tools": {}}
             }
+        })
+    );
+
+    assert_eq!(
+        project_server_capabilities_error_command_result("filesystem", "capabilities failed")
+            .unwrap(),
+        json!({
+            "error": "Failed to get capabilities for 'filesystem': capabilities failed"
         })
     );
 
@@ -610,6 +625,13 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     );
 
     assert_eq!(
+        project_server_resources_error_command_result("filesystem", "resources failed").unwrap(),
+        json!({
+            "error": "Failed to list resources for 'filesystem': resources failed"
+        })
+    );
+
+    assert_eq!(
         project_server_prompts_command_result(
             "linear",
             json!({"prompts": [{"name": "summarize", "description": "Summarize work"}]})
@@ -623,6 +645,11 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
                 }
             }
         })
+    );
+
+    assert_eq!(
+        project_server_prompts_error_command_result("linear", "prompts failed").unwrap(),
+        json!({"error": "Failed to list prompts for 'linear': prompts failed"})
     );
 
     assert_eq!(
@@ -683,7 +710,9 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     );
 
     assert!(project_server_info_command_result("", json!({})).is_err());
+    assert!(project_server_info_error_command_result("filesystem", "").is_err());
     assert!(project_server_capabilities_command_result("", json!({})).is_err());
+    assert!(project_server_capabilities_error_command_result("", "boom").is_err());
     assert!(project_server_health_command_result("", "healthy", 0).is_err());
     assert!(project_server_health_command_result("filesystem", "", 0).is_err());
     assert!(project_server_unhealthy_command_result("", "boom", 0).is_err());
@@ -693,7 +722,9 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     assert!(project_lifecycle_command_result("", "start").is_err());
     assert!(project_lifecycle_command_result("filesystem", "launch").is_err());
     assert!(project_server_resources_command_result("", json!({})).is_err());
+    assert!(project_server_resources_error_command_result("filesystem", "").is_err());
     assert!(project_server_prompts_command_result("", json!({})).is_err());
+    assert!(project_server_prompts_error_command_result("", "boom").is_err());
     assert!(project_read_resource_command_result("", "file:///tmp/a.txt", json!({})).is_err());
     assert!(
         project_read_resource_error_command_result("filesystem", "file:///tmp/a.txt", "").is_err()

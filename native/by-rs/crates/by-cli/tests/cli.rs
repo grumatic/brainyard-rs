@@ -588,6 +588,38 @@ fn mcp_info_hidden_command_projects_initialize_fixture_to_clojure_shape() {
 }
 
 #[test]
+fn mcp_info_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("initialize-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":52,"error":{"code":-32000,"message":"info failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "info",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "52"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "Failed to get server info for 'filesystem': info failed"
+    );
+}
+
+#[test]
 fn mcp_capabilities_hidden_command_projects_initialize_fixture_to_clojure_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("initialize-response.json");
@@ -621,6 +653,38 @@ fn mcp_capabilities_hidden_command_projects_initialize_fixture_to_clojure_shape(
     assert_eq!(
         value["result"]["capabilities"]["serverInfo"],
         serde_json::Value::Null
+    );
+}
+
+#[test]
+fn mcp_capabilities_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("capabilities-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":53,"error":{"code":-32000,"message":"capabilities failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "capabilities",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "53"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "Failed to get capabilities for 'filesystem': capabilities failed"
     );
 }
 
@@ -879,6 +943,38 @@ fn mcp_resources_hidden_command_projects_clojure_server_shape() {
 }
 
 #[test]
+fn mcp_resources_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("resources-list-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":54,"error":{"code":-32000,"message":"resources failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "resources",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "54"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "Failed to list resources for 'filesystem': resources failed"
+    );
+}
+
+#[test]
 fn mcp_prompts_hidden_command_projects_request_without_network() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()
@@ -935,6 +1031,38 @@ fn mcp_prompts_hidden_command_projects_clojure_server_shape() {
     assert_eq!(
         value["result"]["prompts"]["prompts"][0]["arguments"][0]["name"],
         "topic"
+    );
+}
+
+#[test]
+fn mcp_prompts_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("prompts-list-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":55,"error":{"code":-32000,"message":"prompts failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "prompts",
+            "--server-name",
+            "linear",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "55"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "Failed to list prompts for 'linear': prompts failed"
     );
 }
 
