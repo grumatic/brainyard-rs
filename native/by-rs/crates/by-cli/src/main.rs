@@ -2232,6 +2232,7 @@ fn print_config(path: Option<PathBuf>) -> Result<()> {
     };
     let llm = config.llm();
     let agent = config.agent();
+    let permissions = config.permissions();
     println!(
         "agent.default-agent\t{}",
         agent.default_agent.unwrap_or_default()
@@ -2242,6 +2243,11 @@ fn print_config(path: Option<PathBuf>) -> Result<()> {
             .max_iterations
             .map(|value| value.to_string())
             .unwrap_or_default()
+    );
+    println!("permissions.mode\t{}", permissions.mode.unwrap_or_default());
+    println!(
+        "permissions.allowed-dirs\t{}",
+        permissions.allowed_dirs.join(",")
     );
     println!(
         "llm.default-provider\t{}",

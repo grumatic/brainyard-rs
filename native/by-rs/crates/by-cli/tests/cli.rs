@@ -1910,7 +1910,9 @@ fn config_show_reads_llm_defaults_without_writing() {
                     :config {:max-iterations 30}}
             :llm {:default-provider :bedrock
                  :default-model "amazon.nova-lite-v1:0"
-                 :available-providers [:bedrock :claude-code]}}"#,
+                 :available-providers [:bedrock :claude-code]}
+            :permissions {:mode :auto-approve
+                          :allowed-dirs ["/tmp" "/workspace"]}}"#,
     )
     .unwrap();
 
@@ -1922,6 +1924,10 @@ fn config_show_reads_llm_defaults_without_writing() {
         .success()
         .stdout(predicate::str::contains("agent.default-agent\tcoact-agent"))
         .stdout(predicate::str::contains("agent.max-iterations\t30"))
+        .stdout(predicate::str::contains("permissions.mode\tauto-approve"))
+        .stdout(predicate::str::contains(
+            "permissions.allowed-dirs\t/tmp,/workspace",
+        ))
         .stdout(predicate::str::contains("llm.default-provider\tbedrock"))
         .stdout(predicate::str::contains(
             "llm.default-model\tamazon.nova-lite-v1:0",
@@ -1981,6 +1987,8 @@ fn config_show_missing_default_config_prints_empty_defaults_without_writing() {
         .success()
         .stdout(predicate::str::contains("agent.default-agent\t"))
         .stdout(predicate::str::contains("agent.max-iterations\t"))
+        .stdout(predicate::str::contains("permissions.mode\t"))
+        .stdout(predicate::str::contains("permissions.allowed-dirs\t"))
         .stdout(predicate::str::contains("llm.default-provider\t"))
         .stdout(predicate::str::contains("llm.default-model\t"))
         .stdout(predicate::str::contains("llm.available-providers\t"));

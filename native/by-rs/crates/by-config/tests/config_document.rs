@@ -1,6 +1,6 @@
 use by_config::{
     load_dotenv_values, read_config, resolve_default_config_path, resolve_user_id, AgentConfig,
-    BrainyardDirs, LlmConfig, UserIdInputs,
+    BrainyardDirs, LlmConfig, PermissionsConfig, UserIdInputs,
 };
 use std::fs;
 
@@ -94,6 +94,74 @@ fn legacy_agent_max_iterations_matches_clojure_migration_precedence() {
     let doc = read_config(&path).unwrap();
 
     assert_eq!(doc.agent().max_iterations, Some(7));
+}
+
+#[test]
+fn reads_permissions_bridge_values() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.edn");
+    fs::write(
+        &path,
+        r#"{:permissions {:mode :auto-approve
+                          :allowed-dirs ["/tmp" "/workspace"]}}"#,
+    )
+    .unwrap();
+
+    let doc = read_config(&path).unwrap();
+
+    assert_eq!(
+        doc.permissions(),
+        PermissionsConfig {
+            mode: Some("auto-approve".to_string()),
+            allowed_dirs: vec!["/tmp".to_string(), "/workspace".to_string()],
+        }
+    );
+}
+
+#[test]
+fn permissions_bridge_wins_over_agent_config_like_clojure() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.edn");
+    fs::write(
+        &path,
+        r#"{:agent {:config {:permission-mode :deny-by-default
+                             :allowed-dirs ["/agent"]}}
+            :permissions {:mode :ask-each-time
+                          :allowed-dirs ["/permissions"]}}"#,
+    )
+    .unwrap();
+
+    let doc = read_config(&path).unwrap();
+
+    assert_eq!(
+        doc.permissions(),
+        PermissionsConfig {
+            mode: Some("ask-each-time".to_string()),
+            allowed_dirs: vec!["/permissions".to_string()],
+        }
+    );
+}
+
+#[test]
+fn agent_config_permissions_are_used_when_bridge_is_absent() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.edn");
+    fs::write(
+        &path,
+        r#"{:agent {:config {:permission-mode :deny-by-default
+                             :allowed-dirs ["/agent" "/tmp"]}}}"#,
+    )
+    .unwrap();
+
+    let doc = read_config(&path).unwrap();
+
+    assert_eq!(
+        doc.permissions(),
+        PermissionsConfig {
+            mode: Some("deny-by-default".to_string()),
+            allowed_dirs: vec!["/agent".to_string(), "/tmp".to_string()],
+        }
+    );
 }
 
 #[test]

@@ -30,6 +30,12 @@ pub struct AgentConfig {
     pub max_iterations: Option<usize>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PermissionsConfig {
+    pub mode: Option<String>,
+    pub allowed_dirs: Vec<String>,
+}
+
 pub const USER_ID_FALLBACK: &str = "by-user";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -89,6 +95,32 @@ impl ConfigDocument {
         AgentConfig {
             default_agent: agent.and_then(|map| text_value(map.get("default-agent"))),
             max_iterations: agent.and_then(agent_max_iterations),
+        }
+    }
+
+    pub fn permissions(&self) -> PermissionsConfig {
+        let agent_config = match self.raw.get("agent") {
+            Some(EdnValue::Map(agent)) => match agent.get("config") {
+                Some(EdnValue::Map(config)) => Some(config),
+                _ => None,
+            },
+            _ => None,
+        };
+        let permissions = match self.raw.get("permissions") {
+            Some(EdnValue::Map(map)) => Some(map),
+            _ => None,
+        };
+
+        PermissionsConfig {
+            mode: permissions
+                .and_then(|map| text_value(map.get("mode")))
+                .or_else(|| agent_config.and_then(|map| text_value(map.get("permission-mode")))),
+            allowed_dirs: permissions
+                .and_then(|map| vector_text_values(map.get("allowed-dirs")))
+                .or_else(|| {
+                    agent_config.and_then(|map| vector_text_values(map.get("allowed-dirs")))
+                })
+                .unwrap_or_default(),
         }
     }
 }
