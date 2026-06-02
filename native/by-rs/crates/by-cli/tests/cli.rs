@@ -1906,7 +1906,8 @@ fn config_show_reads_llm_defaults_without_writing() {
     let path = dir.path().join("config.edn");
     std::fs::write(
         &path,
-        r#"{:agent {:default-agent :coact-agent}
+        r#"{:agent {:default-agent :coact-agent
+                    :config {:max-iterations 30}}
             :llm {:default-provider :bedrock
                  :default-model "amazon.nova-lite-v1:0"
                  :available-providers [:bedrock :claude-code]}}"#,
@@ -1920,6 +1921,7 @@ fn config_show_reads_llm_defaults_without_writing() {
         .assert()
         .success()
         .stdout(predicate::str::contains("agent.default-agent\tcoact-agent"))
+        .stdout(predicate::str::contains("agent.max-iterations\t30"))
         .stdout(predicate::str::contains("llm.default-provider\tbedrock"))
         .stdout(predicate::str::contains(
             "llm.default-model\tamazon.nova-lite-v1:0",
@@ -1978,6 +1980,7 @@ fn config_show_missing_default_config_prints_empty_defaults_without_writing() {
         .assert()
         .success()
         .stdout(predicate::str::contains("agent.default-agent\t"))
+        .stdout(predicate::str::contains("agent.max-iterations\t"))
         .stdout(predicate::str::contains("llm.default-provider\t"))
         .stdout(predicate::str::contains("llm.default-model\t"))
         .stdout(predicate::str::contains("llm.available-providers\t"));

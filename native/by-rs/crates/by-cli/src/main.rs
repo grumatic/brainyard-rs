@@ -2237,6 +2237,13 @@ fn print_config(path: Option<PathBuf>) -> Result<()> {
         agent.default_agent.unwrap_or_default()
     );
     println!(
+        "agent.max-iterations\t{}",
+        agent
+            .max_iterations
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    );
+    println!(
         "llm.default-provider\t{}",
         llm.default_provider.unwrap_or_default()
     );

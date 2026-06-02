@@ -27,6 +27,7 @@ pub struct LlmConfig {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentConfig {
     pub default_agent: Option<String>,
+    pub max_iterations: Option<usize>,
 }
 
 pub const USER_ID_FALLBACK: &str = "by-user";
@@ -87,6 +88,7 @@ impl ConfigDocument {
 
         AgentConfig {
             default_agent: agent.and_then(|map| text_value(map.get("default-agent"))),
+            max_iterations: agent.and_then(agent_max_iterations),
         }
     }
 }
@@ -315,6 +317,24 @@ fn text_value(value: Option<&EdnValue>) -> Option<String> {
         Some(EdnValue::String(value))
         | Some(EdnValue::Keyword(value))
         | Some(EdnValue::Symbol(value)) => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn agent_max_iterations(agent: &EdnMap) -> Option<usize> {
+    // Match the Clojure migration path: legacy [:agent :max-iterations]
+    // is relocated over [:agent :config :max-iterations] when both exist.
+    usize_value(agent.get("max-iterations")).or_else(|| {
+        let Some(EdnValue::Map(config)) = agent.get("config") else {
+            return None;
+        };
+        usize_value(config.get("max-iterations"))
+    })
+}
+
+fn usize_value(value: Option<&EdnValue>) -> Option<usize> {
+    match value {
+        Some(EdnValue::Integer(value)) => (*value).try_into().ok(),
         _ => None,
     }
 }

@@ -11,7 +11,8 @@ fn reads_llm_defaults_and_available_providers() {
     fs::write(
         &path,
         r#"
-        {:agent {:default-agent :coact-agent}
+        {:agent {:default-agent :coact-agent
+                 :config {:max-iterations 30}}
          :llm {:default-provider :bedrock
                :default-model "amazon.nova-lite-v1:0"
                :available-providers [:bedrock :claude-code]}}
@@ -33,6 +34,7 @@ fn reads_llm_defaults_and_available_providers() {
         doc.agent(),
         AgentConfig {
             default_agent: Some("coact-agent".to_string()),
+            max_iterations: Some(30),
         }
     );
 }
@@ -57,8 +59,41 @@ fn missing_llm_section_returns_empty_defaults() {
         doc.agent(),
         AgentConfig {
             default_agent: Some("coact-agent".to_string()),
+            max_iterations: None,
         }
     );
+}
+
+#[test]
+fn reads_legacy_agent_max_iterations_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.edn");
+    fs::write(&path, "{:agent {:max-iterations 7}}").unwrap();
+
+    let doc = read_config(&path).unwrap();
+
+    assert_eq!(
+        doc.agent(),
+        AgentConfig {
+            default_agent: None,
+            max_iterations: Some(7),
+        }
+    );
+}
+
+#[test]
+fn legacy_agent_max_iterations_matches_clojure_migration_precedence() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.edn");
+    fs::write(
+        &path,
+        "{:agent {:max-iterations 7 :config {:max-iterations 30}}}",
+    )
+    .unwrap();
+
+    let doc = read_config(&path).unwrap();
+
+    assert_eq!(doc.agent().max_iterations, Some(7));
 }
 
 #[test]
