@@ -115,6 +115,30 @@ exit 0
 TMUX
 chmod +x "$fixture_bin/tmux"
 
+write_select_resume_fixture() {
+  local root="$fixture_home/.brainyard/sessions"
+  rm -rf "$root"
+  mkdir -p "$root/older" "$root/newer"
+  cat >"$root/older/meta.edn" <<'EDN'
+{:id "older"
+ :label "Old"
+ :defagent-id :coact-agent
+ :started-at 1000
+ :last-attached-at 2000}
+EDN
+  cat >"$root/newer/meta.edn" <<'EDN'
+{:id "newer"
+ :label "New"
+ :agent-id :main-agent
+ :started-at 1000
+ :last-attached-at 3000}
+EDN
+}
+
+clear_select_resume_fixture() {
+  rm -rf "$fixture_home/.brainyard/sessions"
+}
+
 declare -a cases=(
   "top_help|--help"
   "top_help_short|-h"
@@ -124,6 +148,7 @@ declare -a cases=(
   "run_help|run --help"
   "run_resume_missing|run --resume missing"
   "run_with_tmux_need_session|run --with-tmux"
+  "run_select_resume_with_tmux_need_session|run --select-resume --with-tmux"
   "ask_help|ask --help"
   "ask_missing_question|ask"
   "ask_missing_question_bedrock|ask --provider bedrock --model amazon.nova-lite-v1:0"
@@ -158,9 +183,16 @@ capture_case() {
   local status=0
   local command=""
   local env_prefix=""
+  local stdin_file="/dev/null"
   local arg escaped
 
   printf -v env_prefix 'export PATH=%q:"$PATH"; unset TMUX; ' "$fixture_bin"
+
+  if [[ "$name" == "run_select_resume_with_tmux_need_session" ]]; then
+    write_select_resume_fixture
+    stdin_file="$fixture_home/$name.stdin"
+    printf 'N\n' >"$stdin_file"
+  fi
 
   if [[ -n "$runner_command" ]]; then
     command="$runner_command"
@@ -177,7 +209,7 @@ capture_case() {
       RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        bash -lc "$env_prefix$command" </dev/null
+        bash -lc "$env_prefix$command" <"$stdin_file"
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   else
     (
@@ -189,8 +221,12 @@ capture_case() {
       RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        "$bin_path" "$@" </dev/null
+        "$bin_path" "$@" <"$stdin_file"
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
+  fi
+  if [[ "$name" == "run_select_resume_with_tmux_need_session" ]]; then
+    clear_select_resume_fixture
+    rm -f "$stdin_file"
   fi
   printf '%s\n' "$status" >"$status_file"
 }
