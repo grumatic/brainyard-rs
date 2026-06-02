@@ -2,13 +2,15 @@ use by_mcp::{
     build_http_headers, call_tool_request, extract_jsonrpc_result_from_json,
     extract_jsonrpc_result_from_sse, get_prompt_request, http_initialize_request,
     initialized_notification, list_resources_request, list_tools_request, make_error_response,
-    make_notification, make_request, make_response, parse_sse_events,
+    make_notification, make_request, make_response, mcp_input_schema_to_malli, parse_sse_events,
+    project_registered_tool_descriptors, project_registered_tools_command_result,
     project_tools_list_command_result, read_resource_request, registered_tool_id,
     safe_clojure_symbol_name, stdio_initialize_request, tools_from_list_result,
     validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
 use serde_json::json;
+use std::collections::BTreeMap;
 
 const ORACLE_MCP_SERVERS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -267,6 +269,107 @@ fn registered_tool_ids_match_clojure_dynamic_tool_rules() {
 }
 
 #[test]
+fn mcp_input_schema_conversion_matches_clojure_auto_registration() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "mode": {"enum": ["text", "json"]},
+            "path": {"type": "string", "description": "Path to read"},
+            "limit": {"type": "integer", "default": 10},
+            "metadata": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "recursive": {"type": "boolean"}
+                },
+                "required": ["recursive"]
+            },
+            "scores": {"type": "array", "items": {"type": "number"}}
+        },
+        "required": ["path", "metadata"]
+    });
+
+    let malli_schema = mcp_input_schema_to_malli(&schema);
+    assert_eq!(malli_schema[0], "map");
+
+    let fields = malli_fields_by_name(&malli_schema);
+    assert_eq!(
+        fields["path"],
+        json!(["path", ["string", {"desc": "Path to read"}]])
+    );
+    assert_eq!(
+        fields["limit"],
+        json!(["limit", {"optional": true}, ["int", {"default": 10}]])
+    );
+    assert_eq!(
+        fields["mode"],
+        json!(["mode", {"optional": true}, ["enum", "text", "json"]])
+    );
+    assert_eq!(
+        fields["scores"],
+        json!([
+            "scores",
+            {"optional": true},
+            ["vector", ["or", "int", "double"]]
+        ])
+    );
+
+    let nested_fields = malli_fields_by_name(&fields["metadata"][1]);
+    assert_eq!(nested_fields["recursive"], json!(["recursive", "boolean"]));
+    assert_eq!(
+        nested_fields["pattern"],
+        json!(["pattern", {"optional": true}, ["string", {"optional": true}]])
+    );
+}
+
+#[test]
+fn registered_tool_projection_matches_clojure_dynamic_tool_meta() {
+    let result = json!({
+        "tools": [
+            {
+                "name": "read_file",
+                "description": "Read a file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            },
+            {
+                "name": "bad/name",
+                "description": "Skipped",
+                "inputSchema": {"type": "object"}
+            },
+            {
+                "name": "list-dir",
+                "parameters": {"type": "object"}
+            }
+        ]
+    });
+    let tools = tools_from_list_result("filesystem", &result).unwrap();
+    let descriptors = project_registered_tool_descriptors(&tools);
+
+    assert_eq!(descriptors.len(), 2);
+    assert_eq!(descriptors[0]["id"], "mcp$filesystem$read_file");
+    assert_eq!(descriptors[0]["type"], "tool");
+    assert_eq!(descriptors[0]["description"], "Read a file");
+    assert_eq!(
+        descriptors[0]["input-schema"],
+        json!(["map", ["path", "string"]])
+    );
+    assert_eq!(descriptors[0]["output-schema"], json!(["map"]));
+    assert_eq!(descriptors[0]["mcp-server"], "filesystem");
+    assert_eq!(descriptors[0]["mcp-tool"], "read_file");
+    assert_eq!(descriptors[1]["id"], "mcp$filesystem$list-dir");
+    assert_eq!(descriptors[1]["description"], "MCP tool");
+
+    assert_eq!(
+        project_registered_tools_command_result(&tools)["result"]["total"],
+        2
+    );
+}
+
+#[test]
 fn server_config_validation_matches_clojure_required_fields() {
     validate_server_config(
         "stdio",
@@ -287,6 +390,18 @@ fn server_config_validation_matches_clojure_required_fields() {
         &json!({"url": "https://api.example.com", "headers": []})
     )
     .is_err());
+}
+
+fn malli_fields_by_name(schema: &serde_json::Value) -> BTreeMap<&str, serde_json::Value> {
+    schema.as_array().expect("Malli schema should be an array")[1..]
+        .iter()
+        .map(|entry| {
+            let name = entry[0]
+                .as_str()
+                .expect("Malli field name should be a string");
+            (name, entry.clone())
+        })
+        .collect()
 }
 
 #[test]

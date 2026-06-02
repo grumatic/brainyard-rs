@@ -573,6 +573,58 @@ fn mcp_tools_hidden_command_accepts_raw_result_fixture() {
 }
 
 #[test]
+fn mcp_registered_tools_hidden_command_projects_clojure_auto_registration_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("tools-list-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":9,"result":{"tools":[
+          {"name":"read_file","description":"Read a file","inputSchema":{"type":"object","properties":{"path":{"type":"string","description":"Path to read"},"limit":{"type":"integer","default":10}},"required":["path"]}},
+          {"name":"bad/name","description":"Skipped","inputSchema":{"type":"object"}}
+        ]}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "registered-tools",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "9"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 1);
+    assert_eq!(
+        value["result"]["tools"][0]["id"],
+        "mcp$filesystem$read_file"
+    );
+    assert_eq!(value["result"]["tools"][0]["type"], "tool");
+    assert_eq!(value["result"]["tools"][0]["description"], "Read a file");
+    assert_eq!(value["result"]["tools"][0]["mcp-server"], "filesystem");
+    assert_eq!(value["result"]["tools"][0]["mcp-tool"], "read_file");
+    assert_eq!(
+        value["result"]["tools"][0]["input-schema"],
+        serde_json::json!([
+            "map",
+            ["limit", {"optional": true}, ["int", {"default": 10}]],
+            ["path", ["string", {"desc": "Path to read"}]]
+        ])
+    );
+    assert_eq!(
+        value["result"]["tools"][0]["output-schema"],
+        serde_json::json!(["map"])
+    );
+}
+
+#[test]
 fn config_help_matches_clojure_bootstrap_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()

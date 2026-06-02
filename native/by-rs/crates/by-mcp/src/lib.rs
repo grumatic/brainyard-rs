@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const MCP_VERSION: &str = "2024-11-05";
 pub const JSON_RPC_VERSION: &str = "2.0";
@@ -320,6 +320,51 @@ pub fn project_tools_list_command_result(tools: &[McpTool]) -> Value {
     })
 }
 
+pub fn mcp_input_schema_to_malli(schema: &Value) -> Value {
+    let properties = object_field(schema, "properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = required_field_names(schema);
+    let mut map_schema = vec![json!("map")];
+
+    for (name, spec) in properties {
+        let optional = !required.contains(&name);
+        let inner_schema = json_schema_to_malli(&spec, false);
+        map_schema.push(malli_map_field(&name, optional, inner_schema));
+    }
+
+    Value::Array(map_schema)
+}
+
+pub fn project_registered_tool_descriptors(tools: &[McpTool]) -> Vec<Value> {
+    tools
+        .iter()
+        .filter_map(|tool| {
+            let id = registered_tool_id(&tool.server_name, &tool.name).ok()?;
+            Some(json!({
+                "id": id,
+                "type": "tool",
+                "description": tool.description.as_deref().unwrap_or("MCP tool"),
+                "input-schema": mcp_input_schema_to_malli(&tool.parameters),
+                "output-schema": ["map"],
+                "mcp-server": tool.server_name,
+                "mcp-tool": tool.name,
+            }))
+        })
+        .collect()
+}
+
+pub fn project_registered_tools_command_result(tools: &[McpTool]) -> Value {
+    let projected_tools = project_registered_tool_descriptors(tools);
+    json!({
+        "result": {
+            "tools": projected_tools,
+            "total": projected_tools.len(),
+        }
+    })
+}
+
 pub fn registered_tool_id(server_name: &str, tool_name: &str) -> Result<String> {
     ensure_nonblank(server_name, "server_name")?;
     ensure_nonblank(tool_name, "tool_name")?;
@@ -397,6 +442,115 @@ fn tool_from_list_value(server_name: &str, value: &Value) -> Result<McpTool> {
         description,
         parameters,
     })
+}
+
+fn json_schema_to_malli(spec: &Value, optional: bool) -> Value {
+    let type_name = object_field(spec, "type").and_then(Value::as_str);
+    let enum_values = object_field(spec, "enum").and_then(Value::as_array);
+    let items = object_field(spec, "items");
+    let properties = object_field(spec, "properties").and_then(Value::as_object);
+    let required = required_field_names(spec);
+
+    let bare_schema = if let Some(values) = enum_values {
+        let mut schema = vec![json!("enum")];
+        schema.extend(values.iter().cloned());
+        Value::Array(schema)
+    } else {
+        match type_name {
+            Some("string") => json!("string"),
+            Some("integer") => json!("int"),
+            Some("number") => json!(["or", "int", "double"]),
+            Some("boolean") => json!("boolean"),
+            Some("array") => {
+                let item_schema = items
+                    .map(|item| json_schema_to_malli(item, false))
+                    .unwrap_or_else(|| json!("any"));
+                json!(["vector", item_schema])
+            }
+            Some("object") => {
+                if let Some(properties) = properties.filter(|properties| !properties.is_empty()) {
+                    let mut schema = vec![json!("map")];
+                    for (name, nested_spec) in properties {
+                        let nested_optional = !required.contains(name);
+                        let inner_schema = json_schema_to_malli(nested_spec, nested_optional);
+                        schema.push(malli_map_field(name, nested_optional, inner_schema));
+                    }
+                    Value::Array(schema)
+                } else {
+                    json!("map")
+                }
+            }
+            _ => json!("any"),
+        }
+    };
+
+    attach_malli_meta(bare_schema, malli_meta(spec, optional))
+}
+
+fn malli_map_field(name: &str, optional: bool, schema: Value) -> Value {
+    if optional {
+        json!([name, {"optional": true}, schema])
+    } else {
+        json!([name, schema])
+    }
+}
+
+fn malli_meta(spec: &Value, optional: bool) -> Map<String, Value> {
+    let mut meta = Map::new();
+    if let Some(description) = object_field(spec, "description").and_then(Value::as_str) {
+        meta.insert("desc".to_string(), json!(description));
+    }
+    if let Some(default) = object_field(spec, "default") {
+        meta.insert("default".to_string(), default.clone());
+    }
+    if optional {
+        meta.insert("optional".to_string(), json!(true));
+    }
+    meta
+}
+
+fn attach_malli_meta(schema: Value, meta: Map<String, Value>) -> Value {
+    if meta.is_empty() {
+        return schema;
+    }
+
+    match schema {
+        Value::String(name) => Value::Array(vec![Value::String(name), Value::Object(meta)]),
+        Value::Array(mut values) if matches!(values.first(), Some(Value::String(_))) => {
+            if matches!(values.get(1), Some(Value::Object(_))) {
+                let mut merged = values
+                    .get(1)
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                for (key, value) in meta {
+                    merged.insert(key, value);
+                }
+                values[1] = Value::Object(merged);
+            } else {
+                values.insert(1, Value::Object(meta));
+            }
+            Value::Array(values)
+        }
+        other => other,
+    }
+}
+
+fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
+    value.as_object()?.get(key)
+}
+
+fn required_field_names(value: &Value) -> BTreeSet<String> {
+    object_field(value, "required")
+        .and_then(Value::as_array)
+        .map(|required| {
+            required
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn push_sse_event(
