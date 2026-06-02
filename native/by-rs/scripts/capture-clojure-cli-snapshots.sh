@@ -116,6 +116,7 @@ declare -a cases=(
   "top_version_short|-V"
   "run_help|run --help"
   "ask_help|ask --help"
+  "ask_missing_question|ask"
   "agents_help|agents --help"
   "agents|agents"
   "models_help|models --help"
