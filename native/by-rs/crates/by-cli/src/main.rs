@@ -2403,7 +2403,7 @@ fn resolve_memory_db_path(db: Option<PathBuf>, user_id: Option<String>) -> Resul
 fn preflight_run_session_selection(select_resume: bool, resume: Option<&str>) -> Result<()> {
     if select_resume {
         let root = default_sessions_root().context("could not determine default session root")?;
-        let sessions = sorted_resume_sessions(&root)?;
+        let sessions = sorted_sessions_by_activity(&root)?;
         let _picked = pick_session_interactive(&sessions)?;
         return Ok(());
     }
@@ -2429,7 +2429,7 @@ fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn sorted_resume_sessions(root: &Path) -> Result<Vec<by_persist::SessionSummary>> {
+fn sorted_sessions_by_activity(root: &Path) -> Result<Vec<by_persist::SessionSummary>> {
     let mut sessions = by_persist::list_sessions(root)?;
     sessions.sort_by(|left, right| {
         let left_ts = left
@@ -2487,6 +2487,79 @@ fn pick_session_interactive(sessions: &[by_persist::SessionSummary]) -> Result<O
 
     let choice = line.trim();
     if choice.is_empty() || matches!(choice, "n" | "N" | "new") {
+        return Ok(None);
+    }
+
+    let Some(index) = choice.parse::<usize>().ok() else {
+        return Ok(None);
+    };
+    if index == 0 || index > n {
+        return Ok(None);
+    }
+
+    Ok(Some(sessions[index - 1].id.clone()))
+}
+
+fn pick_session_to_prune_interactive(
+    sessions: &[by_persist::SessionSummary],
+) -> Result<Option<String>> {
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let mut output = io::stdout();
+    pick_session_to_prune_with_io(sessions, &mut input, &mut output)
+}
+
+fn pick_session_to_prune_with_io<R: io::BufRead, W: Write>(
+    sessions: &[by_persist::SessionSummary],
+    input: &mut R,
+    output: &mut W,
+) -> Result<Option<String>> {
+    let n = sessions.len();
+    if n == 0 {
+        return Ok(None);
+    }
+
+    writeln!(output)?;
+    writeln!(
+        output,
+        "{n} persisted session(s) — pick one to prune, or (C)ancel:"
+    )?;
+    writeln!(output, "{}", "-".repeat(88))?;
+    writeln!(
+        output,
+        " {:>3}  {:<30} {:<14} {:<18} {:<10} last",
+        "#", "session-id", "label", "agent", "size"
+    )?;
+    writeln!(output, "{}", "-".repeat(88))?;
+    for (index, session) in sessions.iter().enumerate() {
+        let last = session
+            .last_attached_at_millis
+            .or(session.started_at_millis)
+            .and_then(format_age_millis)
+            .unwrap_or_else(|| "-".to_string());
+        writeln!(
+            output,
+            " {:>3}  {:<30} {:<14} {:<18} {:<10} {}",
+            index + 1,
+            session.id,
+            session.label.as_deref().unwrap_or("-"),
+            session.agent.as_deref().unwrap_or("-"),
+            format_bytes(session.bytes),
+            last
+        )?;
+    }
+    writeln!(output)?;
+    write!(output, "Choice [1- {n} ] / (C)ancel: ")?;
+    output.flush()?;
+
+    let mut line = String::new();
+    let bytes_read = input.read_line(&mut line)?;
+    if bytes_read == 0 {
+        return Ok(None);
+    }
+
+    let choice = line.trim();
+    if choice.is_empty() || matches!(choice, "c" | "C" | "cancel") {
         return Ok(None);
     }
 
@@ -2624,9 +2697,19 @@ fn prune_session(
         Some(root) => root,
         None => default_sessions_root().context("could not determine default session root")?,
     };
-    let target = positional_session_id
-        .or(session_id)
-        .context("Usage: by sessions prune <session-id>")?;
+    let target = match positional_session_id.or(session_id) {
+        Some(target) => Some(target),
+        None if io::stdin().is_terminal() && io::stdout().is_terminal() => {
+            let sessions = sorted_sessions_by_activity(&root)?;
+            pick_session_to_prune_interactive(&sessions)?
+        }
+        None => bail!("Usage: by sessions prune <session-id>"),
+    };
+
+    let Some(target) = target else {
+        println!("Cancelled.");
+        return Ok(());
+    };
 
     if by_persist::delete_session_dir(&root, &target)? {
         println!("Deleted session: {target}");
@@ -2712,4 +2795,61 @@ fn default_config_path() -> Option<PathBuf> {
 
 fn default_sessions_root() -> Option<PathBuf> {
     process_dirs().and_then(|dirs| by_config::default_sessions_root(&dirs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn session(id: &str, label: &str, agent: &str, bytes: u64) -> by_persist::SessionSummary {
+        by_persist::SessionSummary {
+            id: id.to_string(),
+            label: Some(label.to_string()),
+            agent: Some(agent.to_string()),
+            bytes,
+            created_at: None,
+            started_at: None,
+            started_at_millis: None,
+            last_active: None,
+            last_attached_at_millis: None,
+            path: PathBuf::from(id),
+        }
+    }
+
+    #[test]
+    fn prune_picker_renders_clojure_prompt_and_selects_number() {
+        let sessions = vec![
+            session("newer", "New", "main-agent", 1),
+            session("older", "Old", "coact-agent", 2048),
+        ];
+        let mut input = Cursor::new(b"2\n".to_vec());
+        let mut output = Vec::new();
+
+        let picked = pick_session_to_prune_with_io(&sessions, &mut input, &mut output).unwrap();
+
+        assert_eq!(picked, Some("older".to_string()));
+        let stdout = String::from_utf8(output).unwrap();
+        assert!(stdout.contains("2 persisted session(s) — pick one to prune, or (C)ancel:"));
+        assert!(stdout.contains("Choice [1- 2 ] / (C)ancel: "));
+        assert!(stdout.contains("newer"));
+        assert!(stdout.contains("older"));
+        assert!(
+            stdout.find("newer").unwrap() < stdout.find("older").unwrap(),
+            "sessions should render in caller-provided order: {stdout}"
+        );
+    }
+
+    #[test]
+    fn prune_picker_cancel_returns_none() {
+        let sessions = vec![session("alpha", "Alpha", "coact-agent", 0)];
+        let mut input = Cursor::new(b"C\n".to_vec());
+        let mut output = Vec::new();
+
+        let picked = pick_session_to_prune_with_io(&sessions, &mut input, &mut output).unwrap();
+
+        assert_eq!(picked, None);
+        let stdout = String::from_utf8(output).unwrap();
+        assert!(stdout.contains("Choice [1- 1 ] / (C)ancel: "));
+    }
 }
