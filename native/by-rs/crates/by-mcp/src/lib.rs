@@ -351,6 +351,29 @@ pub fn project_server_prompts_command_result(server_name: &str, prompts: Value) 
     }))
 }
 
+pub fn project_server_info_command_result(server_name: &str, server_info: Value) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "server-info": server_info,
+        }
+    }))
+}
+
+pub fn project_server_capabilities_command_result(
+    server_name: &str,
+    capabilities: Value,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "capabilities": capabilities,
+        }
+    }))
+}
+
 pub fn mcp_input_schema_to_malli(schema: &Value) -> Value {
     let properties = object_field(schema, "properties")
         .and_then(Value::as_object)

@@ -5,7 +5,8 @@ use by_mcp::{
     make_error_response, make_notification, make_request, make_response, mcp_input_schema_to_malli,
     normalize_tool_args, parse_sse_events, project_get_prompt_command_result,
     project_read_resource_command_result, project_registered_tool_descriptors,
-    project_registered_tools_command_result, project_server_prompts_command_result,
+    project_registered_tools_command_result, project_server_capabilities_command_result,
+    project_server_info_command_result, project_server_prompts_command_result,
     project_server_resources_command_result, project_tool_calls_command_result,
     project_tools_list_command_result, read_resource_request, registered_tool_id,
     safe_clojure_symbol_name, stdio_initialize_request, tool_call_request_from_call,
@@ -457,6 +458,42 @@ fn mcp_tool_call_projection_matches_clojure_command_shape() {
 #[test]
 fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     assert_eq!(
+        project_server_info_command_result(
+            "filesystem",
+            json!({
+                "protocolVersion": MCP_VERSION,
+                "serverInfo": {"name": "fs", "version": "1.0.0"},
+                "capabilities": {"resources": {}, "tools": {}}
+            })
+        )
+        .unwrap(),
+        json!({
+            "result": {
+                "name": "filesystem",
+                "server-info": {
+                    "protocolVersion": MCP_VERSION,
+                    "serverInfo": {"name": "fs", "version": "1.0.0"},
+                    "capabilities": {"resources": {}, "tools": {}}
+                }
+            }
+        })
+    );
+
+    assert_eq!(
+        project_server_capabilities_command_result(
+            "filesystem",
+            json!({"resources": {}, "tools": {}})
+        )
+        .unwrap(),
+        json!({
+            "result": {
+                "name": "filesystem",
+                "capabilities": {"resources": {}, "tools": {}}
+            }
+        })
+    );
+
+    assert_eq!(
         project_server_resources_command_result(
             "filesystem",
             json!({"resources": [{"uri": "file:///tmp/a.txt", "name": "a.txt"}]})
@@ -526,6 +563,8 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
         })
     );
 
+    assert!(project_server_info_command_result("", json!({})).is_err());
+    assert!(project_server_capabilities_command_result("", json!({})).is_err());
     assert!(project_server_resources_command_result("", json!({})).is_err());
     assert!(project_server_prompts_command_result("", json!({})).is_err());
     assert!(project_read_resource_command_result("", "file:///tmp/a.txt", json!({})).is_err());

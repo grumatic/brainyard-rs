@@ -266,6 +266,30 @@ enum McpCommand {
         #[arg(value_name = "SERVER_NAME")]
         server_name: String,
     },
+    /// Project an initialize response fixture into server-info shape.
+    Info {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Path to an initialize JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: PathBuf,
+        /// JSON-RPC request id in the fixture response.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
+    /// Project an initialize/capabilities fixture into capabilities shape.
+    Capabilities {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Path to an initialize JSON-RPC response, raw result, or raw capabilities fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: PathBuf,
+        /// JSON-RPC request id in the fixture response.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
     /// Project a tools/list JSON-RPC fixture into the agent command result shape.
     Tools {
         /// MCP server name that produced the tools/list response.
@@ -520,6 +544,16 @@ fn run() -> Result<()> {
                 fixture,
                 server_name,
             } => print_mcp_config(fixture, server_name),
+            McpCommand::Info {
+                server_name,
+                fixture_response,
+                request_id,
+            } => print_mcp_info(server_name, fixture_response, request_id),
+            McpCommand::Capabilities {
+                server_name,
+                fixture_response,
+                request_id,
+            } => print_mcp_capabilities(server_name, fixture_response, request_id),
             McpCommand::Tools {
                 server_name,
                 fixture_response,
@@ -1175,6 +1209,48 @@ fn print_mcp_config(fixture: Option<PathBuf>, server_name: String) -> Result<()>
     Ok(())
 }
 
+fn print_mcp_info(server_name: String, fixture_response: PathBuf, request_id: u64) -> Result<()> {
+    let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+        format!(
+            "failed to read MCP initialize response fixture {}",
+            fixture_response.display()
+        )
+    })?;
+    let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+        format!(
+            "failed to project MCP initialize response fixture {}",
+            fixture_response.display()
+        )
+    })?;
+    let output = by_mcp::project_server_info_command_result(&server_name, result)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn print_mcp_capabilities(
+    server_name: String,
+    fixture_response: PathBuf,
+    request_id: u64,
+) -> Result<()> {
+    let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+        format!(
+            "failed to read MCP capabilities response fixture {}",
+            fixture_response.display()
+        )
+    })?;
+    let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+        format!(
+            "failed to project MCP capabilities response fixture {}",
+            fixture_response.display()
+        )
+    })?;
+    let nested_capabilities = result.get("capabilities").cloned();
+    let capabilities = nested_capabilities.unwrap_or(result);
+    let output = by_mcp::project_server_capabilities_command_result(&server_name, capabilities)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 fn print_mcp_tools(server_name: String, fixture_response: PathBuf, request_id: u64) -> Result<()> {
     let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
         format!(
@@ -1407,6 +1483,9 @@ fn extract_mcp_fixture_result(raw: &str, request_id: u64) -> Result<serde_json::
         || value.get("content").is_some()
         || value.get("contents").is_some()
         || value.get("messages").is_some()
+        || value.get("serverInfo").is_some()
+        || value.get("server-info").is_some()
+        || value.get("capabilities").is_some()
     {
         Ok(value)
     } else if let Some(result) = value.get("result") {

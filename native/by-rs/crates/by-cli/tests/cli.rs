@@ -499,6 +499,80 @@ fn mcp_config_hidden_command_projects_clojure_config_shape() {
 }
 
 #[test]
+fn mcp_info_hidden_command_projects_initialize_fixture_to_clojure_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("initialize-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":47,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"filesystem","version":"1.0.0"},"capabilities":{"resources":{},"tools":{}}}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "info",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "47"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "filesystem");
+    assert_eq!(
+        value["result"]["server-info"]["serverInfo"]["name"],
+        "filesystem"
+    );
+    assert_eq!(
+        value["result"]["server-info"]["capabilities"]["resources"],
+        serde_json::json!({})
+    );
+}
+
+#[test]
+fn mcp_capabilities_hidden_command_projects_initialize_fixture_to_clojure_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("initialize-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":48,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"filesystem","version":"1.0.0"},"capabilities":{"resources":{"subscribe":true},"prompts":{},"tools":{}}}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "capabilities",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "48"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "filesystem");
+    assert_eq!(
+        value["result"]["capabilities"]["resources"]["subscribe"],
+        true
+    );
+    assert_eq!(
+        value["result"]["capabilities"]["serverInfo"],
+        serde_json::Value::Null
+    );
+}
+
+#[test]
 fn mcp_tools_hidden_command_projects_clojure_list_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("tools-list-response.json");
