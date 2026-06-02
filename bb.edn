@@ -968,6 +968,26 @@
   {:doc "Run Polylith info"
    :task (shell "clj" "-M:poly" "info")}
 
+  ;; --------------- Rust port tasks ---------------
+  by-rs:fmt
+  {:doc "Format the Rust port workspace"
+   :task (shell {:dir "native/by-rs"} "cargo" "fmt" "--all")}
+
+  by-rs:test
+  {:doc "Run Rust port workspace tests: bb by-rs:test [cargo test args]"
+   :task (apply shell {:dir "native/by-rs"} "cargo" "test" "--workspace" *command-line-args*)}
+
+  by-rs:clippy
+  {:doc "Run Rust port clippy with warnings denied"
+   :task (shell {:dir "native/by-rs"} "cargo" "clippy" "--workspace" "--all-targets" "--" "-D" "warnings")}
+
+  by-rs:verify
+  {:doc "Run Rust port fmt check, clippy, and workspace tests"
+   :task (do
+           (shell {:dir "native/by-rs"} "cargo" "fmt" "--all" "--check")
+           (shell {:dir "native/by-rs"} "cargo" "clippy" "--workspace" "--all-targets" "--" "-D" "warnings")
+           (shell {:dir "native/by-rs"} "cargo" "test" "--workspace"))}
+
   ;; --------------- Migrations ---------------
   migrate:plan-agent
   {:doc "One-shot copy of legacy `.brainyard/plans/*.md` into the new
