@@ -6,6 +6,8 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const RESUME_LATEST_SENTINEL: &str = "--by-resume-latest--";
+
 #[derive(Debug, Parser)]
 #[command(name = "by")]
 #[command(about = "Brainyard Agent CLI")]
@@ -502,13 +504,14 @@ fn run() -> Result<()> {
             with_tmux: _with_tmux,
             no_with_tmux: _no_with_tmux,
             max_iterations: _max_iterations,
-            resume: _resume,
+            resume,
             select_resume: _select_resume,
             no_select_resume: _no_select_resume,
             new: _new,
             no_new: _no_new,
             positional: _positional,
         } => {
+            preflight_run_resume(resume.as_deref())?;
             bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
         }
         Commands::Ask {
@@ -2364,6 +2367,24 @@ fn resolve_memory_db_path(db: Option<PathBuf>, user_id: Option<String>) -> Resul
 
     by_config::default_memory_db_path(&dirs, &user_id)
         .context("could not determine default memory database path; pass --db or set HOME")
+}
+
+fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
+    let Some(resume) = resume else {
+        return Ok(());
+    };
+    if resume == RESUME_LATEST_SENTINEL {
+        return Ok(());
+    }
+
+    let root = default_sessions_root().context("could not determine default session root")?;
+    let sessions = by_persist::list_sessions(&root)?;
+    if !sessions.iter().any(|session| session.id == resume) {
+        eprintln!("Error: no persisted session named '{resume}'.");
+        std::process::exit(1);
+    }
+
+    Ok(())
 }
 
 fn print_sessions(root: Option<PathBuf>) -> Result<()> {

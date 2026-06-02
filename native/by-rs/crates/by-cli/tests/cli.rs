@@ -150,6 +150,44 @@ fn run_accepts_bare_resume_flag_like_clojure() {
 }
 
 #[test]
+fn run_explicit_missing_resume_matches_clojure_error() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["run", "--resume", "missing"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "Error: no persisted session named 'missing'.",
+        ))
+        .stderr(predicate::str::contains("by-rs run is not implemented yet").not());
+
+    assert!(!home.path().join(".brainyard").exists());
+}
+
+#[test]
+fn run_explicit_existing_resume_reaches_unimplemented_tui() {
+    let home = tempfile::tempdir().unwrap();
+    let session_dir = home.path().join(".brainyard/sessions/alpha");
+    std::fs::create_dir_all(&session_dir).unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["run", "--resume", "alpha"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("no persisted session named").not());
+}
+
+#[test]
 fn agents_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
