@@ -5,7 +5,7 @@ fn loads_tools_agents_and_models_from_fixture_object() {
     let registry = load_registry_str(
         r#"{
           "tools": [{"id": "code$eval", "type": "command", "description": "Evaluate code", "inputSchema": ["map"]}],
-          "agents": [{"id": "coder", "name": "Coder", "description": "Writes code"}],
+          "agents": [{"id": "coder", "name": "Coder", "description": "Writes code", "maxIterations": 12}],
           "models": [{"provider": "bedrock", "id": "amazon.nova-lite-v1:0", "description": "Nova Lite"}],
           "mcpServers": [{"name": "gmail", "transport": "stdio", "config": {"command": "bash", "args": ["-c", "npx -y mcp-remote https://gmailmcp.googleapis.com/mcp/v1"]}, "enabled": false, "autoRegisterTools": true}]
         }"#,
@@ -19,6 +19,7 @@ fn loads_tools_agents_and_models_from_fixture_object() {
     assert_eq!(registry.agents.len(), 1);
     assert_eq!(registry.agents[0].id, "coder");
     assert_eq!(registry.agents[0].name, "Coder");
+    assert_eq!(registry.agents[0].max_iterations, Some(12));
     assert_eq!(registry.models[0].provider, "bedrock");
     assert_eq!(registry.models[0].id, "amazon.nova-lite-v1:0");
     assert_eq!(registry.models[0].label(), "bedrock:amazon.nova-lite-v1:0");
@@ -40,6 +41,17 @@ fn uses_agent_name_as_id_when_id_is_missing() {
 
     assert_eq!(registry.agents[0].id, "reviewer");
     assert_eq!(registry.agents[0].name, "reviewer");
+}
+
+#[test]
+fn accepts_agent_max_iterations_aliases() {
+    let kebab = load_registry_str(r#"{"agents": [{"name": "debug", "max-iterations": 30}]}"#)
+        .expect("kebab-case agent max iterations should load");
+    let snake = load_registry_str(r#"{"agents": [{"name": "review", "max_iterations": 40}]}"#)
+        .expect("snake_case agent max iterations should load");
+
+    assert_eq!(kebab.agents[0].max_iterations, Some(30));
+    assert_eq!(snake.agents[0].max_iterations, Some(40));
 }
 
 #[test]

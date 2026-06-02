@@ -45,15 +45,17 @@
         agent-id (or (present-string id)
                      (present-string (:id spec))
                      (present-string (:id meta)))]
-    (array-map
-     :id agent-id
-     :name (or (present-string (:name spec)) agent-id)
-     :description (or (present-string (:description spec))
-                      (present-string (:description meta))
-                      "")
-     :type (or (present-string (:type spec))
-               (present-string (:type meta))
-               "agent"))))
+    (cond-> (array-map
+             :id agent-id
+             :name (or (present-string (:name spec)) agent-id)
+             :description (or (present-string (:description spec))
+                              (present-string (:description meta))
+                              "")
+             :type (or (present-string (:type spec))
+                       (present-string (:type meta))
+                       "agent"))
+      (:max-iterations meta)
+      (assoc :maxIterations (:max-iterations meta)))))
 
 (defn- model-entry [spec]
   (cond-> (array-map

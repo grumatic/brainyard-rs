@@ -2075,11 +2075,39 @@ fn ask_dry_run_explicit_agent_wins_over_config_default() {
 }
 
 #[test]
+fn ask_dry_run_exposes_agent_registry_max_iterations_default() {
+    let dir = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .env_remove("BRAINYARD_PROJECT_DIR")
+        .args([
+            "ask",
+            "-a",
+            "debug-agent",
+            "-p",
+            "bedrock",
+            "-m",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"agent_id\": \"debug-agent\""))
+        .stdout(predicate::str::contains("\"max_iterations\": 30"));
+}
+
+#[test]
 fn ask_dry_run_exposes_explicit_max_iterations_override() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .args([
             "ask",
+            "-a",
+            "debug-agent",
             "-p",
             "bedrock",
             "-m",
@@ -2091,7 +2119,8 @@ fn ask_dry_run_exposes_explicit_max_iterations_override() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("\"max_iterations\": 7"));
+        .stdout(predicate::str::contains("\"max_iterations\": 7"))
+        .stdout(predicate::str::contains("\"max_iterations\": 30").not());
 }
 
 #[test]

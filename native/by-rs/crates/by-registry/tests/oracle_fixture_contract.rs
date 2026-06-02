@@ -33,6 +33,13 @@ fn clojure_oracle_registry_fixture_is_loadable() {
     );
     assert!(
         registry
+            .agents
+            .iter()
+            .any(|agent| agent.id == "debug-agent" && agent.max_iterations == Some(30)),
+        "oracle fixture should preserve agent max-iterations metadata"
+    );
+    assert!(
+        registry
             .models
             .iter()
             .any(|model| model.provider == "bedrock"),
@@ -99,6 +106,13 @@ fn embedded_clojure_oracle_registry_is_loadable() {
             .iter()
             .any(|model| model.provider == "bedrock"),
         "embedded registry should include Bedrock model metadata"
+    );
+    assert!(
+        registry
+            .agents
+            .iter()
+            .any(|agent| agent.id == "debug-agent" && agent.max_iterations == Some(30)),
+        "embedded registry should preserve agent max-iterations metadata"
     );
     assert!(
         registry.tools.iter().any(|tool| tool.id == "code$eval"),

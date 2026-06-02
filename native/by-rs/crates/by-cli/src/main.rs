@@ -1048,6 +1048,7 @@ fn print_ask(args: AskRequest) -> Result<()> {
             .as_ref()
             .and_then(|config| config.default_agent.as_deref()),
     );
+    let resolved_max_iterations = resolve_ask_max_iterations(&resolved_agent, args.max_iterations)?;
     let resolved_provider = match provider.as_str() {
         "claude-code" => llm_config
             .as_ref()
@@ -1097,7 +1098,7 @@ fn print_ask(args: AskRequest) -> Result<()> {
             "provider": resolved_provider,
             "operation": projection.operation,
             "network": false,
-            "agent_session": ask_agent_session(&resolved_agent, user_id, args.max_iterations),
+            "agent_session": ask_agent_session(&resolved_agent, user_id, resolved_max_iterations),
             "request": projection.request,
         });
         println!("{}", serde_json::to_string_pretty(&dry_run)?);
@@ -1135,7 +1136,7 @@ fn print_ask(args: AskRequest) -> Result<()> {
             "provider": "bedrock",
             "operation": "Converse",
             "network": false,
-            "agent_session": ask_agent_session(&resolved_agent, user_id, args.max_iterations),
+            "agent_session": ask_agent_session(&resolved_agent, user_id, resolved_max_iterations),
             "region": runtime.region,
             "aws_profile": runtime.aws_profile,
             "request": request,
@@ -1159,6 +1160,21 @@ fn print_ask(args: AskRequest) -> Result<()> {
         println!("{}", response.text);
     }
     Ok(())
+}
+
+fn resolve_ask_max_iterations(
+    agent_id: &str,
+    cli_max_iterations: Option<usize>,
+) -> Result<Option<usize>> {
+    if cli_max_iterations.is_some() {
+        return Ok(cli_max_iterations);
+    }
+
+    Ok(by_registry::load_embedded_oracle_registry()?
+        .agents
+        .into_iter()
+        .find(|agent| agent.id == agent_id)
+        .and_then(|agent| agent.max_iterations))
 }
 
 fn resolve_ask_agent(cli_agent: String, config_default_agent: Option<&str>) -> String {

@@ -33,6 +33,7 @@ pub struct AgentDescriptor {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    pub max_iterations: Option<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -204,6 +205,7 @@ fn raw_agent_from_value(value: Value) -> Result<AgentDescriptor> {
         id,
         name,
         description: raw.description,
+        max_iterations: raw.max_iterations,
     })
 }
 
@@ -277,6 +279,12 @@ struct RawAgent {
     id: Option<String>,
     name: Option<String>,
     description: Option<String>,
+    #[serde(
+        rename = "maxIterations",
+        alias = "max-iterations",
+        alias = "max_iterations"
+    )]
+    max_iterations: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
