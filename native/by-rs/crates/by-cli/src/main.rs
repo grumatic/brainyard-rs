@@ -783,6 +783,7 @@ fn top_level_help() -> String {
             "\n",
             "GLOBAL OPTIONS:\n",
             "   -?, --help\n",
+            "\n",
         ),
         env!("BY_BUILD_VERSION")
     )
@@ -809,6 +810,7 @@ fn run_help() -> &'static str {
         "       --[no-]select-resume               Pick a persisted session to resume from an interactive menu\n",
         "       --[no-]new                         (deprecated; sessions start fresh by default — accepted as a no-op)\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
@@ -827,6 +829,7 @@ fn ask_help() -> &'static str {
         "   -u, --user-id S                      User identity for sessions/memory (default: $BY_USER_ID, else OS login name)\n",
         "   -n, --max-iterations N               Max agent iterations\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
@@ -840,6 +843,7 @@ fn agents_help() -> &'static str {
         "\n",
         "OPTIONS:\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
@@ -854,6 +858,7 @@ fn models_help() -> &'static str {
         "OPTIONS:\n",
         "   -p, --provider S  Filter to a single provider (e.g. anthropic, openai, bedrock)\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
@@ -873,6 +878,7 @@ fn config_help() -> &'static str {
         "       --[no-]dry-run       Compute the config but do not write it\n",
         "       --log S              Override bootstrap-log path\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
@@ -894,6 +900,7 @@ fn sessions_help() -> String {
             "\n",
             "GLOBAL OPTIONS:\n",
             "   -?, --help\n",
+            "\n",
         ),
         env!("BY_BUILD_VERSION")
     )
@@ -909,6 +916,7 @@ fn sessions_list_help() -> &'static str {
         "\n",
         "OPTIONS:\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
@@ -923,6 +931,7 @@ fn sessions_prune_help() -> &'static str {
         "OPTIONS:\n",
         "   -s, --session-id S  Session ID\n",
         "   -?, --help\n",
+        "\n",
     )
 }
 
