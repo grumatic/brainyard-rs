@@ -627,6 +627,14 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
         project_error_command_result("server-name is required").unwrap(),
         json!({"error": "server-name is required"})
     );
+    assert_eq!(
+        project_error_command_result("resource-uri is required").unwrap(),
+        json!({"error": "resource-uri is required"})
+    );
+    assert_eq!(
+        project_error_command_result("prompt-name is required").unwrap(),
+        json!({"error": "prompt-name is required"})
+    );
 
     assert_eq!(
         project_lifecycle_command_result("filesystem", "start").unwrap(),

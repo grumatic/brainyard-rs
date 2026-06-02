@@ -1334,6 +1334,46 @@ fn mcp_read_resource_hidden_command_projects_request_without_network() {
 }
 
 #[test]
+fn mcp_read_resource_hidden_command_projects_blank_server_to_error_shape() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "read-resource",
+            "--server-name",
+            "",
+            "--resource-uri",
+            "file:///tmp/a.txt",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], "server-name is required");
+}
+
+#[test]
+fn mcp_read_resource_hidden_command_projects_blank_uri_to_error_shape() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "read-resource",
+            "--server-name",
+            "filesystem",
+            "--resource-uri",
+            "",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], "resource-uri is required");
+}
+
+#[test]
 fn mcp_read_resource_hidden_command_projects_response_fixture_to_command_result() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("resources-read-response.json");
@@ -1430,6 +1470,46 @@ fn mcp_get_prompt_hidden_command_projects_request_without_network() {
     assert_eq!(value["method"], "prompts/get");
     assert_eq!(value["params"]["name"], "summarize");
     assert_eq!(value["params"]["arguments"]["topic"], "mcp");
+}
+
+#[test]
+fn mcp_get_prompt_hidden_command_projects_blank_server_to_error_shape() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "get-prompt",
+            "--server-name",
+            "",
+            "--prompt-name",
+            "summarize",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], "server-name is required");
+}
+
+#[test]
+fn mcp_get_prompt_hidden_command_projects_blank_prompt_to_error_shape() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "get-prompt",
+            "--server-name",
+            "linear",
+            "--prompt-name",
+            "",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], "prompt-name is required");
 }
 
 #[test]

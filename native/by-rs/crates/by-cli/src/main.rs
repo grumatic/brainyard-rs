@@ -1591,6 +1591,17 @@ fn print_mcp_read_resource(
     fixture_response: Option<PathBuf>,
     request_id: u64,
 ) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+    if resource_uri.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("resource-uri is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     if let Some(fixture_response) = fixture_response {
         let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
             format!(
@@ -1638,6 +1649,17 @@ fn print_mcp_get_prompt(
     fixture_response: Option<PathBuf>,
     request_id: u64,
 ) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+    if prompt_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("prompt-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     let prompt_arguments = parse_prompt_arguments(&arguments)?;
 
     if let Some(fixture_response) = fixture_response {
