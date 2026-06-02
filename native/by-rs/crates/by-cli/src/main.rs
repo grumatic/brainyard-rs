@@ -2,7 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
-use std::io::IsTerminal;
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -535,13 +535,13 @@ fn run() -> Result<()> {
             no_with_tmux: _no_with_tmux,
             max_iterations: _max_iterations,
             resume,
-            select_resume: _select_resume,
+            select_resume,
             no_select_resume: _no_select_resume,
             new: _new,
             no_new: _no_new,
             positional: _positional,
         } => {
-            preflight_run_resume(resume.as_deref())?;
+            preflight_run_session_selection(select_resume, resume.as_deref())?;
             preflight_run_tmux(with_tmux);
             bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
         }
@@ -2400,6 +2400,17 @@ fn resolve_memory_db_path(db: Option<PathBuf>, user_id: Option<String>) -> Resul
         .context("could not determine default memory database path; pass --db or set HOME")
 }
 
+fn preflight_run_session_selection(select_resume: bool, resume: Option<&str>) -> Result<()> {
+    if select_resume {
+        let root = default_sessions_root().context("could not determine default session root")?;
+        let sessions = sorted_resume_sessions(&root)?;
+        let _picked = pick_session_interactive(&sessions)?;
+        return Ok(());
+    }
+
+    preflight_run_resume(resume)
+}
+
 fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
     let Some(resume) = resume else {
         return Ok(());
@@ -2416,6 +2427,77 @@ fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn sorted_resume_sessions(root: &Path) -> Result<Vec<by_persist::SessionSummary>> {
+    let mut sessions = by_persist::list_sessions(root)?;
+    sessions.sort_by(|left, right| {
+        let left_ts = left
+            .last_attached_at_millis
+            .or(left.started_at_millis)
+            .unwrap_or(0);
+        let right_ts = right
+            .last_attached_at_millis
+            .or(right.started_at_millis)
+            .unwrap_or(0);
+        right_ts.cmp(&left_ts).then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(sessions)
+}
+
+fn pick_session_interactive(sessions: &[by_persist::SessionSummary]) -> Result<Option<String>> {
+    let n = sessions.len();
+    if n == 0 {
+        return Ok(None);
+    }
+
+    println!();
+    println!("{n} persisted session(s) — pick one to resume, or [N] for a new session:");
+    println!("{}", "-".repeat(72));
+    println!(
+        " {:>3}  {:<30} {:<14} {:<18} {:<10} last",
+        "#", "session-id", "label", "agent", "size"
+    );
+    println!("{}", "-".repeat(88));
+    for (index, session) in sessions.iter().enumerate() {
+        let last = session
+            .last_attached_at_millis
+            .or(session.started_at_millis)
+            .and_then(format_age_millis)
+            .unwrap_or_else(|| "-".to_string());
+        println!(
+            " {:>3}  {:<30} {:<14} {:<18} {:<10} {}",
+            index + 1,
+            session.id,
+            session.label.as_deref().unwrap_or("-"),
+            session.agent.as_deref().unwrap_or("-"),
+            format_bytes(session.bytes),
+            last
+        );
+    }
+    println!();
+    print!("Choice [1- {n} ] / (N)ew: ");
+    io::stdout().flush()?;
+
+    let mut line = String::new();
+    let bytes_read = io::stdin().read_line(&mut line)?;
+    if bytes_read == 0 {
+        return Ok(None);
+    }
+
+    let choice = line.trim();
+    if choice.is_empty() || matches!(choice, "n" | "N" | "new") {
+        return Ok(None);
+    }
+
+    let Some(index) = choice.parse::<usize>().ok() else {
+        return Ok(None);
+    };
+    if index == 0 || index > n {
+        return Ok(None);
+    }
+
+    Ok(Some(sessions[index - 1].id.clone()))
 }
 
 fn preflight_run_tmux(with_tmux: bool) {

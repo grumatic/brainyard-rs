@@ -61,6 +61,12 @@ fn system_binary(candidates: &[&'static str]) -> &'static str {
         .expect("expected a system binary for tmux probe fixture")
 }
 
+fn write_session_meta(home: &Path, session_id: &str, meta: &str) {
+    let session_dir = home.join(".brainyard/sessions").join(session_id);
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(session_dir.join("meta.edn"), meta).unwrap();
+}
+
 #[test]
 fn top_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
@@ -232,6 +238,83 @@ fn run_explicit_existing_resume_reaches_unimplemented_tui() {
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("by-rs run is not implemented yet"))
         .stderr(predicate::str::contains("no persisted session named").not());
+}
+
+#[test]
+fn run_select_resume_without_sessions_reaches_unimplemented_tui_without_prompt() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["run", "--select-resume"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("no persisted session named").not());
+}
+
+#[test]
+fn run_select_resume_takes_precedence_over_explicit_missing_resume() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["run", "--select-resume", "--resume", "missing"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("no persisted session named").not());
+}
+
+#[test]
+fn run_select_resume_prints_clojure_style_picker_before_tui() {
+    let home = tempfile::tempdir().unwrap();
+    write_session_meta(
+        home.path(),
+        "older",
+        r#"{:id "older"
+            :label "Old"
+            :defagent-id :coact-agent
+            :started-at 1000
+            :last-attached-at 2000}"#,
+    );
+    write_session_meta(
+        home.path(),
+        "newer",
+        r#"{:id "newer"
+            :label "New"
+            :agent-id :main-agent
+            :started-at 1000
+            :last-attached-at 3000}"#,
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["run", "--select-resume"])
+        .write_stdin("N\n")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"));
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(
+        stdout.contains("2 persisted session(s) — pick one to resume, or [N] for a new session:")
+    );
+    assert!(stdout.contains("Choice [1- 2 ] / (N)ew: "));
+    assert!(stdout.contains("newer"));
+    assert!(stdout.contains("older"));
+    assert!(
+        stdout.find("newer").unwrap() < stdout.find("older").unwrap(),
+        "newest session should be listed first: {stdout}"
+    );
 }
 
 #[test]
