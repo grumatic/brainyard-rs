@@ -499,6 +499,58 @@ fn mcp_config_hidden_command_projects_clojure_config_shape() {
 }
 
 #[test]
+fn mcp_config_hidden_command_projects_missing_server_to_error_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("mcp-servers.json");
+    std::fs::write(
+        &fixture,
+        r#"{
+          "gmail": {
+            "transport": "stdio",
+            "config": {"command": "bash", "args": ["-c", "npx -y server"]},
+            "enabled": false,
+            "auto-register-tools": true
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["mcp", "config", "--fixture"])
+        .arg(&fixture)
+        .arg("missing")
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "MCP server 'missing' not found in configuration"
+    );
+}
+
+#[test]
+fn mcp_config_hidden_command_projects_blank_server_to_error_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("mcp-servers.json");
+    std::fs::write(&fixture, r#"{}"#).unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["mcp", "config", "--fixture"])
+        .arg(&fixture)
+        .arg("")
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], "server-name is required");
+}
+
+#[test]
 fn mcp_info_hidden_command_projects_initialize_fixture_to_clojure_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("initialize-response.json");

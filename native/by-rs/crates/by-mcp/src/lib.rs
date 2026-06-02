@@ -445,6 +445,13 @@ pub fn project_disconnected_server_command_result(server_name: &str) -> Result<V
     }))
 }
 
+pub fn project_error_command_result(error: &str) -> Result<Value> {
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": error,
+    }))
+}
+
 pub fn project_lifecycle_command_result(server_name: &str, op: &str) -> Result<Value> {
     ensure_nonblank(server_name, "server_name")?;
     let verb = match op {

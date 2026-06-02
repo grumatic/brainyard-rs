@@ -4,18 +4,18 @@ use by_mcp::{
     http_initialize_request, initialized_notification, list_prompts_request,
     list_resources_request, list_tools_request, make_error_response, make_notification,
     make_request, make_response, mcp_input_schema_to_malli, normalize_tool_args, parse_sse_events,
-    ping_request, project_disconnected_server_command_result, project_get_prompt_command_result,
-    project_get_prompt_error_command_result, project_lifecycle_command_result,
-    project_read_resource_command_result, project_read_resource_error_command_result,
-    project_registered_tool_descriptors, project_registered_tools_command_result,
-    project_server_capabilities_command_result, project_server_health_command_result,
-    project_server_info_command_result, project_server_prompts_command_result,
-    project_server_resources_command_result, project_server_unhealthy_command_result,
-    project_tool_call_errors_command_result, project_tool_calls_command_result,
-    project_tools_list_command_result, read_resource_request, registered_tool_id,
-    safe_clojure_symbol_name, stdio_initialize_request, tool_call_request_from_call,
-    tool_calls_from_value, tools_from_list_result, validate_server_config, CLIENT_NAME,
-    CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
+    ping_request, project_disconnected_server_command_result, project_error_command_result,
+    project_get_prompt_command_result, project_get_prompt_error_command_result,
+    project_lifecycle_command_result, project_read_resource_command_result,
+    project_read_resource_error_command_result, project_registered_tool_descriptors,
+    project_registered_tools_command_result, project_server_capabilities_command_result,
+    project_server_health_command_result, project_server_info_command_result,
+    project_server_prompts_command_result, project_server_resources_command_result,
+    project_server_unhealthy_command_result, project_tool_call_errors_command_result,
+    project_tool_calls_command_result, project_tools_list_command_result, read_resource_request,
+    registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
+    tool_call_request_from_call, tool_calls_from_value, tools_from_list_result,
+    validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
 use serde_json::json;
@@ -576,6 +576,11 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     );
 
     assert_eq!(
+        project_error_command_result("server-name is required").unwrap(),
+        json!({"error": "server-name is required"})
+    );
+
+    assert_eq!(
         project_lifecycle_command_result("filesystem", "start").unwrap(),
         json!({"result": "MCP server 'filesystem' started successfully"})
     );
@@ -684,6 +689,7 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     assert!(project_server_unhealthy_command_result("", "boom", 0).is_err());
     assert!(project_server_unhealthy_command_result("filesystem", "", 0).is_err());
     assert!(project_disconnected_server_command_result("").is_err());
+    assert!(project_error_command_result("").is_err());
     assert!(project_lifecycle_command_result("", "start").is_err());
     assert!(project_lifecycle_command_result("filesystem", "launch").is_err());
     assert!(project_server_resources_command_result("", json!({})).is_err());

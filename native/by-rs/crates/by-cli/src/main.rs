@@ -1225,10 +1225,22 @@ fn print_mcp_servers(fixture: Option<PathBuf>) -> Result<()> {
 
 fn print_mcp_config(fixture: Option<PathBuf>, server_name: String) -> Result<()> {
     let servers = load_mcp_servers_or_embedded(fixture)?;
-    let server = servers
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    let Some(server) = servers
         .into_iter()
         .find(|server| server.name == server_name)
-        .with_context(|| format!("MCP server '{server_name}' not found in configuration"))?;
+    else {
+        let output = by_mcp::project_error_command_result(&format!(
+            "MCP server '{server_name}' not found in configuration"
+        ))?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    };
     by_mcp::validate_server_config(&server.transport, &server.config)
         .with_context(|| format!("invalid MCP config for server '{}'", server.name))?;
 
