@@ -2,6 +2,18 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use rusqlite::Connection;
 
+fn assert_json_error(args: &[&str], expected: &str) {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(args)
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], expected);
+}
+
 #[test]
 fn top_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
@@ -551,6 +563,21 @@ fn mcp_config_hidden_command_projects_blank_server_to_error_shape() {
 }
 
 #[test]
+fn mcp_info_hidden_command_projects_blank_server_to_error_shape() {
+    assert_json_error(
+        &[
+            "mcp",
+            "info",
+            "--server-name",
+            "",
+            "--fixture-response",
+            "/definitely/missing/initialize-response.json",
+        ],
+        "server-name is required",
+    );
+}
+
+#[test]
 fn mcp_info_hidden_command_projects_initialize_fixture_to_clojure_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("initialize-response.json");
@@ -689,6 +716,21 @@ fn mcp_capabilities_hidden_command_projects_error_fixture_to_command_result() {
 }
 
 #[test]
+fn mcp_capabilities_hidden_command_projects_blank_server_to_error_shape() {
+    assert_json_error(
+        &[
+            "mcp",
+            "capabilities",
+            "--server-name",
+            "",
+            "--fixture-response",
+            "/definitely/missing/capabilities-response.json",
+        ],
+        "server-name is required",
+    );
+}
+
+#[test]
 fn mcp_health_hidden_command_projects_ping_request_without_network() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()
@@ -709,6 +751,14 @@ fn mcp_health_hidden_command_projects_ping_request_without_network() {
     assert_eq!(value["id"], 49);
     assert_eq!(value["method"], "ping");
     assert_eq!(value["params"], serde_json::json!({}));
+}
+
+#[test]
+fn mcp_health_hidden_command_projects_blank_server_to_error_shape() {
+    assert_json_error(
+        &["mcp", "health", "--server-name", "", "--request-id", "49"],
+        "server-name is required",
+    );
 }
 
 #[test]
@@ -805,6 +855,14 @@ fn mcp_lifecycle_hidden_command_projects_success_shape() {
     assert_eq!(
         value["result"],
         "MCP server 'filesystem' restarted successfully"
+    );
+}
+
+#[test]
+fn mcp_lifecycle_hidden_command_projects_blank_server_to_error_shape() {
+    assert_json_error(
+        &["mcp", "lifecycle", "--op", "restart", "--server-name", ""],
+        "server-name is required",
     );
 }
 
@@ -935,6 +993,21 @@ fn mcp_resources_hidden_command_projects_request_without_network() {
 }
 
 #[test]
+fn mcp_resources_hidden_command_projects_blank_server_to_error_shape() {
+    assert_json_error(
+        &[
+            "mcp",
+            "resources",
+            "--server-name",
+            "",
+            "--request-id",
+            "43",
+        ],
+        "server-name is required",
+    );
+}
+
+#[test]
 fn mcp_resources_hidden_command_projects_clojure_server_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("resources-list-response.json");
@@ -1024,6 +1097,14 @@ fn mcp_prompts_hidden_command_projects_request_without_network() {
     assert_eq!(value["id"], 45);
     assert_eq!(value["method"], "prompts/list");
     assert_eq!(value["params"], serde_json::json!({}));
+}
+
+#[test]
+fn mcp_prompts_hidden_command_projects_blank_server_to_error_shape() {
+    assert_json_error(
+        &["mcp", "prompts", "--server-name", "", "--request-id", "45"],
+        "server-name is required",
+    );
 }
 
 #[test]

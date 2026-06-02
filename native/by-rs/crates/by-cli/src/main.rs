@@ -1260,6 +1260,12 @@ fn print_mcp_config(fixture: Option<PathBuf>, server_name: String) -> Result<()>
 }
 
 fn print_mcp_info(server_name: String, fixture_response: PathBuf, request_id: u64) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
         format!(
             "failed to read MCP initialize response fixture {}",
@@ -1294,6 +1300,12 @@ fn print_mcp_capabilities(
     fixture_response: PathBuf,
     request_id: u64,
 ) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
         format!(
             "failed to read MCP capabilities response fixture {}",
@@ -1332,6 +1344,12 @@ fn print_mcp_health(
     request_id: u64,
     timestamp_ms: u64,
 ) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     if let Some(fixture_response) = fixture_response {
         let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
             format!(
@@ -1365,9 +1383,6 @@ fn print_mcp_health(
             by_mcp::project_server_health_command_result(&server_name, "healthy", timestamp_ms)?;
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        if server_name.trim().is_empty() {
-            bail!("server-name is required");
-        }
         let output = by_mcp::ping_request(request_id);
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
@@ -1382,6 +1397,12 @@ fn print_mcp_disconnected(server_name: String) -> Result<()> {
 }
 
 fn print_mcp_lifecycle(op: String, server_name: String) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     let output = by_mcp::project_lifecycle_command_result(&server_name, &op)?;
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
@@ -1423,6 +1444,12 @@ fn print_mcp_resources(
     fixture_response: Option<PathBuf>,
     request_id: u64,
 ) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     if let Some(fixture_response) = fixture_response {
         let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
             format!(
@@ -1464,6 +1491,12 @@ fn print_mcp_prompts(
     fixture_response: Option<PathBuf>,
     request_id: u64,
 ) -> Result<()> {
+    if server_name.trim().is_empty() {
+        let output = by_mcp::project_error_command_result("server-name is required")?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
     if let Some(fixture_response) = fixture_response {
         let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
             format!(
