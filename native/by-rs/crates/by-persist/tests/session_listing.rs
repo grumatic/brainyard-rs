@@ -1,7 +1,7 @@
 use by_contracts::parse_map;
 use by_persist::{
     append_session_message, delete_session_dir, list_sessions, list_sessions_with_warnings,
-    save_session_meta, SessionMetaUpdate,
+    read_session_messages, save_session_meta, SessionMessage, SessionMetaUpdate,
 };
 
 #[test]
@@ -188,6 +188,59 @@ fn append_session_message_rejects_path_traversal() {
 
     let err = append_session_message(root.path(), "../outside", "user", "hello")
         .expect_err("invalid id should fail");
+
+    assert!(err.to_string().contains("invalid session id"));
+}
+
+#[test]
+fn read_session_messages_restores_only_message_payloads() {
+    let root = tempfile::tempdir().expect("temp root");
+    let session_dir = root.path().join("agt-test");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(
+        session_dir.join("messages.log"),
+        r#"{:t 1 :kind :agent.ask/pre :payload {:input "ignored"}}
+{:t 2 :kind :message :payload {:role "user" :content "hello \"brainyard\""}}
+not valid edn
+{:t 3 :kind :message :payload {:role "assistant" :content "hi\nthere"}}
+{:t 4 :kind :message :payload {:role :tool :content "ignored non-string role"}}
+"#,
+    )
+    .unwrap();
+
+    let messages = read_session_messages(root.path(), "agt-test")
+        .expect("message log should restore tolerantly");
+
+    assert_eq!(
+        messages,
+        vec![
+            SessionMessage {
+                role: "user".to_string(),
+                content: "hello \"brainyard\"".to_string(),
+            },
+            SessionMessage {
+                role: "assistant".to_string(),
+                content: "hi\nthere".to_string(),
+            },
+        ]
+    );
+}
+
+#[test]
+fn read_session_messages_missing_log_is_empty() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let messages =
+        read_session_messages(root.path(), "agt-missing").expect("missing log should be empty");
+
+    assert!(messages.is_empty());
+}
+
+#[test]
+fn read_session_messages_rejects_path_traversal() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let err = read_session_messages(root.path(), "../outside").expect_err("invalid id should fail");
 
     assert!(err.to_string().contains("invalid session id"));
 }

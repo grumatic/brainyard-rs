@@ -583,8 +583,6 @@ fn run() -> Result<()> {
                 resume.as_deref(),
             )?;
             preflight_run_tmux(with_tmux && !no_with_tmux);
-            let session_selection =
-                prepare_run_session(session_selection, &agent, user_id.as_deref())?;
             if one_turn_requested {
                 return print_run_bedrock_one_turn(RunBedrockOneTurnRequest {
                     agent,
@@ -603,6 +601,8 @@ fn run() -> Result<()> {
                     session_selection,
                 });
             }
+            let session_selection =
+                prepare_run_session(session_selection, &agent, user_id.as_deref())?;
             print_run_preview(agent, provider, model.as_deref(), &session_selection)
         }
         Commands::Ask {
@@ -1190,13 +1190,7 @@ fn print_run_bedrock_one_turn(args: RunBedrockOneTurnRequest) -> Result<()> {
         bail!("by-rs run one-turn MVP currently supports provider 'bedrock' only");
     }
 
-    let session_id = args
-        .session_selection
-        .session_id
-        .as_deref()
-        .context("run session was not prepared")?
-        .to_string();
-    let messages = vec![by_llm::ChatMessage::user(question.clone())];
+    let messages = run_one_turn_messages(&args.session_selection, &question)?;
     let dotenv = by_config::load_process_dotenv()?;
     let catalog_region = bedrock_catalog_region(&model)?;
     let runtime = by_llm::resolve_bedrock_runtime_options(by_llm::BedrockRuntimeInputs {
@@ -1216,6 +1210,17 @@ fn print_run_bedrock_one_turn(args: RunBedrockOneTurnRequest) -> Result<()> {
         prompt_cache: !args.no_prompt_cache && by_llm::bedrock_supports_prompt_cache(&model),
         drop_temperature: by_llm::bedrock_drops_temperature(&model),
     };
+
+    let session_selection = prepare_run_session(
+        args.session_selection,
+        &resolved_agent,
+        args.user_id.as_deref(),
+    )?;
+    let session_id = session_selection
+        .session_id
+        .as_deref()
+        .context("run session was not prepared")?
+        .to_string();
 
     if let Some(path) = args.fixture_response {
         let raw: serde_json::Value = serde_json::from_str(
@@ -1244,7 +1249,7 @@ fn print_run_bedrock_one_turn(args: RunBedrockOneTurnRequest) -> Result<()> {
             "operation": "Converse",
             "network": false,
             "session_id": session_id,
-            "resume": args.session_selection.resume,
+            "resume": session_selection.resume,
             "agent_session": ask_agent_session(&resolved_agent, user_id, resolved_max_iterations),
             "region": runtime.region,
             "aws_profile": runtime.aws_profile,
@@ -1309,6 +1314,38 @@ fn persist_run_bedrock_exchange(session_id: &str, question: &str, answer: &str) 
     by_persist::append_session_message(&root, session_id, "user", question)?;
     by_persist::append_session_message(&root, session_id, "assistant", answer)?;
     Ok(())
+}
+
+fn run_one_turn_messages(
+    selection: &RunSessionSelection,
+    question: &str,
+) -> Result<Vec<by_llm::ChatMessage>> {
+    let mut messages = Vec::new();
+    if selection.resume {
+        let root = default_sessions_root().context("could not determine default session root")?;
+        let session_id = selection
+            .session_id
+            .as_deref()
+            .context("run resume session was not selected")?;
+        messages.extend(
+            by_persist::read_session_messages(&root, session_id)?
+                .into_iter()
+                .filter_map(persisted_message_to_chat_message),
+        );
+    }
+    messages.push(by_llm::ChatMessage::user(question.to_string()));
+    Ok(messages)
+}
+
+fn persisted_message_to_chat_message(
+    message: by_persist::SessionMessage,
+) -> Option<by_llm::ChatMessage> {
+    match message.role.as_str() {
+        "assistant" => Some(by_llm::ChatMessage::assistant(message.content)),
+        "system" => Some(by_llm::ChatMessage::system(message.content)),
+        "user" => Some(by_llm::ChatMessage::user(message.content)),
+        _ => None,
+    }
 }
 
 fn print_ask(args: AskRequest) -> Result<()> {

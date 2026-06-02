@@ -654,6 +654,70 @@ fn run_bedrock_fixture_one_turn_persists_restore_compatible_messages() {
 }
 
 #[test]
+fn run_bedrock_dry_run_resume_includes_persisted_message_history() {
+    let home = tempfile::tempdir().unwrap();
+    let session_id = "agt-run-resume-history";
+    write_session_meta(
+        home.path(),
+        session_id,
+        r#"{:agent-id :coact-agent
+            :defagent-id :coact-agent
+            :started-at 1000
+            :last-attached-at 1000}"#,
+    );
+    let session_dir = home.path().join(".brainyard/sessions").join(session_id);
+    let original_messages = r#"{:t 1 :kind :agent.ask/pre :payload {:input "ignored"}}
+{:t 2 :kind :message :payload {:role "user" :content "First turn"}}
+{:t 3 :kind :message :payload {:role "assistant" :content "Intermediate answer"}}
+"#;
+    std::fs::write(session_dir.join("messages.log"), original_messages).unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "run",
+            "--resume",
+            session_id,
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "--no-prompt-cache",
+            "Second turn",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["resume"], true);
+    assert_eq!(value["session_id"], session_id);
+    let messages = value
+        .pointer("/request/messages")
+        .and_then(serde_json::Value::as_array)
+        .expect("dry-run should include Bedrock messages");
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[0]["role"], "user");
+    assert_eq!(messages[0]["content"][0]["text"], "First turn");
+    assert_eq!(messages[1]["role"], "assistant");
+    assert_eq!(messages[1]["content"][0]["text"], "Intermediate answer");
+    assert_eq!(messages[2]["role"], "user");
+    assert_eq!(messages[2]["content"][0]["text"], "Second turn");
+
+    assert_eq!(
+        std::fs::read_to_string(session_dir.join("messages.log")).unwrap(),
+        original_messages
+    );
+    let meta = read_session_meta(home.path(), session_id);
+    assert!(meta.contains(":started-at 1000"));
+    assert!(!meta.contains(":last-attached-at 1000"));
+}
+
+#[test]
 fn run_one_turn_mode_rejects_non_bedrock_before_network() {
     let home = tempfile::tempdir().unwrap();
 
@@ -676,6 +740,40 @@ fn run_one_turn_mode_rejects_non_bedrock_before_network() {
         .stderr(predicate::str::contains(
             "by-rs run one-turn MVP currently supports provider 'bedrock' only",
         ));
+
+    assert!(!home
+        .path()
+        .join(".brainyard/sessions/agt-run-openai")
+        .exists());
+}
+
+#[test]
+fn run_one_turn_mode_rejects_missing_prompt_before_session_write() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-missing-prompt")
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "run",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "by-rs run Bedrock MVP requires a prompt",
+        ));
+
+    assert!(!home
+        .path()
+        .join(".brainyard/sessions/agt-run-missing-prompt")
+        .exists());
 }
 
 #[test]

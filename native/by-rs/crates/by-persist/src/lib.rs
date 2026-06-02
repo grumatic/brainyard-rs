@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use by_contracts::{parse_map, EdnMap, EdnValue};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
-use std::io::{ErrorKind, Write};
+use std::io::{BufRead, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,6 +33,12 @@ pub struct SessionReadWarning {
 pub struct SessionList {
     pub sessions: Vec<SessionSummary>,
     pub warnings: Vec<SessionReadWarning>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionMessage {
+    pub role: String,
+    pub content: String,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -191,6 +197,59 @@ pub fn append_session_message(
         .with_context(|| format!("failed to append session message {}", log_path.display()))?;
 
     Ok(log_path)
+}
+
+pub fn read_session_messages(
+    root: impl AsRef<Path>,
+    session_id: &str,
+) -> Result<Vec<SessionMessage>> {
+    let root = root.as_ref();
+    let Some(target_name) = safe_session_dir_name(session_id) else {
+        anyhow::bail!("invalid session id for message read: {session_id}");
+    };
+    let log_path = root.join(target_name).join("messages.log");
+    let file = match std::fs::File::open(&log_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to read session messages {}", log_path.display())
+            });
+        }
+    };
+
+    let mut messages = Vec::new();
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line.with_context(|| {
+            format!(
+                "failed to read session messages line from {}",
+                log_path.display()
+            )
+        })?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(event) = parse_map(trimmed) else {
+            continue;
+        };
+        if !matches!(event.get("kind"), Some(EdnValue::Keyword(kind)) if kind == "message") {
+            continue;
+        }
+        let Some(EdnValue::Map(payload)) = event.get("payload") else {
+            continue;
+        };
+        let (Some(role), Some(content)) = (payload.string("role"), payload.string("content"))
+        else {
+            continue;
+        };
+        messages.push(SessionMessage {
+            role: role.to_string(),
+            content: content.to_string(),
+        });
+    }
+
+    Ok(messages)
 }
 
 fn load_session_summary(
