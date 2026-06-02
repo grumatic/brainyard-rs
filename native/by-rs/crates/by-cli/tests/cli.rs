@@ -39,6 +39,19 @@ fn top_help_matches_clojure_command_surface() {
 }
 
 #[test]
+fn top_version_flags_are_not_routed_to_run_command() {
+    for flag in ["--version", "-V"] {
+        Command::cargo_bin("by-rs")
+            .unwrap()
+            .arg(flag)
+            .assert()
+            .success()
+            .stdout(predicate::str::starts_with("by "))
+            .stderr(predicate::str::is_empty());
+    }
+}
+
+#[test]
 fn run_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
