@@ -305,6 +305,12 @@ enum McpCommand {
         #[arg(long = "timestamp-ms", default_value_t = 0)]
         timestamp_ms: u64,
     },
+    /// Project the Clojure disconnected-server command result shape.
+    Disconnected {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+    },
     /// Project an MCP lifecycle command success result without side effects.
     Lifecycle {
         /// Operation: start, stop, or restart.
@@ -584,6 +590,7 @@ fn run() -> Result<()> {
                 request_id,
                 timestamp_ms,
             } => print_mcp_health(server_name, fixture_response, request_id, timestamp_ms),
+            McpCommand::Disconnected { server_name } => print_mcp_disconnected(server_name),
             McpCommand::Lifecycle { op, server_name } => print_mcp_lifecycle(op, server_name),
             McpCommand::Tools {
                 server_name,
@@ -1312,6 +1319,12 @@ fn print_mcp_health(
         println!("{}", serde_json::to_string_pretty(&output)?);
     }
 
+    Ok(())
+}
+
+fn print_mcp_disconnected(server_name: String) -> Result<()> {
+    let output = by_mcp::project_disconnected_server_command_result(&server_name)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
 

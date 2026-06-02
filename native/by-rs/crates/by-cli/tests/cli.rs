@@ -623,6 +623,21 @@ fn mcp_health_hidden_command_projects_ping_fixture_to_clojure_shape() {
 }
 
 #[test]
+fn mcp_disconnected_hidden_command_projects_clojure_shape() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["mcp", "disconnected", "--server-name", "filesystem"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "filesystem");
+    assert_eq!(value["result"]["status"], "disconnected");
+    assert_eq!(value["result"]["message"], "Server is not connected");
+}
+
+#[test]
 fn mcp_lifecycle_hidden_command_projects_success_shape() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()

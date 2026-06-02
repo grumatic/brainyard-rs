@@ -390,6 +390,17 @@ pub fn project_server_health_command_result(
     }))
 }
 
+pub fn project_disconnected_server_command_result(server_name: &str) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "status": "disconnected",
+            "message": "Server is not connected",
+        }
+    }))
+}
+
 pub fn project_lifecycle_command_result(server_name: &str, op: &str) -> Result<Value> {
     ensure_nonblank(server_name, "server_name")?;
     let verb = match op {
