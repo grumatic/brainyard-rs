@@ -3,9 +3,10 @@ use by_mcp::{
     extract_jsonrpc_result_from_sse, get_prompt_request, http_initialize_request,
     initialized_notification, list_prompts_request, list_resources_request, list_tools_request,
     make_error_response, make_notification, make_request, make_response, mcp_input_schema_to_malli,
-    normalize_tool_args, parse_sse_events, project_get_prompt_command_result,
-    project_read_resource_command_result, project_registered_tool_descriptors,
-    project_registered_tools_command_result, project_server_capabilities_command_result,
+    normalize_tool_args, parse_sse_events, ping_request, project_get_prompt_command_result,
+    project_lifecycle_command_result, project_read_resource_command_result,
+    project_registered_tool_descriptors, project_registered_tools_command_result,
+    project_server_capabilities_command_result, project_server_health_command_result,
     project_server_info_command_result, project_server_prompts_command_result,
     project_server_resources_command_result, project_tool_calls_command_result,
     project_tools_list_command_result, read_resource_request, registered_tool_id,
@@ -85,6 +86,10 @@ fn standard_request_helpers_match_mcp_params() {
     assert_eq!(
         initialized_notification(),
         json!({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+    );
+    assert_eq!(
+        ping_request(10),
+        json!({"jsonrpc": "2.0", "id": 10, "method": "ping", "params": {}})
     );
     assert_eq!(
         list_resources_request(11),
@@ -494,6 +499,30 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     );
 
     assert_eq!(
+        project_server_health_command_result("filesystem", "healthy", 1_700_000_000_000).unwrap(),
+        json!({
+            "result": {
+                "status": "healthy",
+                "timestamp": 1_700_000_000_000_u64,
+                "name": "filesystem"
+            }
+        })
+    );
+
+    assert_eq!(
+        project_lifecycle_command_result("filesystem", "start").unwrap(),
+        json!({"result": "MCP server 'filesystem' started successfully"})
+    );
+    assert_eq!(
+        project_lifecycle_command_result("filesystem", "stop").unwrap(),
+        json!({"result": "MCP server 'filesystem' stopped successfully"})
+    );
+    assert_eq!(
+        project_lifecycle_command_result("filesystem", "restart").unwrap(),
+        json!({"result": "MCP server 'filesystem' restarted successfully"})
+    );
+
+    assert_eq!(
         project_server_resources_command_result(
             "filesystem",
             json!({"resources": [{"uri": "file:///tmp/a.txt", "name": "a.txt"}]})
@@ -565,6 +594,10 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
 
     assert!(project_server_info_command_result("", json!({})).is_err());
     assert!(project_server_capabilities_command_result("", json!({})).is_err());
+    assert!(project_server_health_command_result("", "healthy", 0).is_err());
+    assert!(project_server_health_command_result("filesystem", "", 0).is_err());
+    assert!(project_lifecycle_command_result("", "start").is_err());
+    assert!(project_lifecycle_command_result("filesystem", "launch").is_err());
     assert!(project_server_resources_command_result("", json!({})).is_err());
     assert!(project_server_prompts_command_result("", json!({})).is_err());
     assert!(project_read_resource_command_result("", "file:///tmp/a.txt", json!({})).is_err());

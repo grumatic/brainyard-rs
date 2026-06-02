@@ -573,6 +573,79 @@ fn mcp_capabilities_hidden_command_projects_initialize_fixture_to_clojure_shape(
 }
 
 #[test]
+fn mcp_health_hidden_command_projects_ping_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "health",
+            "--server-name",
+            "filesystem",
+            "--request-id",
+            "49",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["jsonrpc"], "2.0");
+    assert_eq!(value["id"], 49);
+    assert_eq!(value["method"], "ping");
+    assert_eq!(value["params"], serde_json::json!({}));
+}
+
+#[test]
+fn mcp_health_hidden_command_projects_ping_fixture_to_clojure_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("ping-response.json");
+    std::fs::write(&fixture, r#"{"jsonrpc":"2.0","id":50,"result":{}}"#).unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "health",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "50", "--timestamp-ms", "1700000000000"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "filesystem");
+    assert_eq!(value["result"]["status"], "healthy");
+    assert_eq!(value["result"]["timestamp"], 1_700_000_000_000_u64);
+}
+
+#[test]
+fn mcp_lifecycle_hidden_command_projects_success_shape() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "lifecycle",
+            "--op",
+            "restart",
+            "--server-name",
+            "filesystem",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["result"],
+        "MCP server 'filesystem' restarted successfully"
+    );
+}
+
+#[test]
 fn mcp_tools_hidden_command_projects_clojure_list_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("tools-list-response.json");

@@ -374,6 +374,35 @@ pub fn project_server_capabilities_command_result(
     }))
 }
 
+pub fn project_server_health_command_result(
+    server_name: &str,
+    status: &str,
+    timestamp_ms: u64,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(status, "status")?;
+    Ok(json!({
+        "result": {
+            "status": status,
+            "timestamp": timestamp_ms,
+            "name": server_name,
+        }
+    }))
+}
+
+pub fn project_lifecycle_command_result(server_name: &str, op: &str) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    let verb = match op {
+        "start" => "started",
+        "stop" => "stopped",
+        "restart" => "restarted",
+        other => bail!("unsupported MCP lifecycle op '{other}'"),
+    };
+    Ok(json!({
+        "result": format!("MCP server '{server_name}' {verb} successfully")
+    }))
+}
+
 pub fn mcp_input_schema_to_malli(schema: &Value) -> Value {
     let properties = object_field(schema, "properties")
         .and_then(Value::as_object)

@@ -290,6 +290,30 @@ enum McpCommand {
         #[arg(long = "request-id", default_value_t = 1)]
         request_id: u64,
     },
+    /// Project a ping request or successful health-check fixture.
+    Health {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Optional ping JSON-RPC response fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: Option<PathBuf>,
+        /// JSON-RPC request id.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+        /// Timestamp to include in the projected health result.
+        #[arg(long = "timestamp-ms", default_value_t = 0)]
+        timestamp_ms: u64,
+    },
+    /// Project an MCP lifecycle command success result without side effects.
+    Lifecycle {
+        /// Operation: start, stop, or restart.
+        #[arg(long, value_name = "OP")]
+        op: String,
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+    },
     /// Project a tools/list JSON-RPC fixture into the agent command result shape.
     Tools {
         /// MCP server name that produced the tools/list response.
@@ -554,6 +578,13 @@ fn run() -> Result<()> {
                 fixture_response,
                 request_id,
             } => print_mcp_capabilities(server_name, fixture_response, request_id),
+            McpCommand::Health {
+                server_name,
+                fixture_response,
+                request_id,
+                timestamp_ms,
+            } => print_mcp_health(server_name, fixture_response, request_id, timestamp_ms),
+            McpCommand::Lifecycle { op, server_name } => print_mcp_lifecycle(op, server_name),
             McpCommand::Tools {
                 server_name,
                 fixture_response,
@@ -1251,6 +1282,45 @@ fn print_mcp_capabilities(
     Ok(())
 }
 
+fn print_mcp_health(
+    server_name: String,
+    fixture_response: Option<PathBuf>,
+    request_id: u64,
+    timestamp_ms: u64,
+) -> Result<()> {
+    if let Some(fixture_response) = fixture_response {
+        let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+            format!(
+                "failed to read MCP ping response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        extract_mcp_ping_fixture_result(&raw, request_id).with_context(|| {
+            format!(
+                "failed to project MCP ping response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let output =
+            by_mcp::project_server_health_command_result(&server_name, "healthy", timestamp_ms)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        if server_name.trim().is_empty() {
+            bail!("server-name is required");
+        }
+        let output = by_mcp::ping_request(request_id);
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
+fn print_mcp_lifecycle(op: String, server_name: String) -> Result<()> {
+    let output = by_mcp::project_lifecycle_command_result(&server_name, &op)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 fn print_mcp_tools(server_name: String, fixture_response: PathBuf, request_id: u64) -> Result<()> {
     let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
         format!(
@@ -1492,6 +1562,23 @@ fn extract_mcp_fixture_result(raw: &str, request_id: u64) -> Result<serde_json::
         Ok(result.clone())
     } else {
         bail!("MCP fixture must contain a raw result object or JSON-RPC result");
+    }
+}
+
+fn extract_mcp_ping_fixture_result(raw: &str, request_id: u64) -> Result<()> {
+    if let Some(result) = by_mcp::extract_jsonrpc_result_from_json(raw, request_id)? {
+        if result.is_object() {
+            return Ok(());
+        }
+        bail!("MCP ping result must be an object");
+    }
+
+    let value: serde_json::Value =
+        serde_json::from_str(raw).context("invalid MCP ping fixture JSON")?;
+    if value.is_object() {
+        Ok(())
+    } else {
+        bail!("MCP ping fixture must contain a raw object result or JSON-RPC result");
     }
 }
 
