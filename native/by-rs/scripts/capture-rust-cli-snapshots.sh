@@ -117,6 +117,8 @@ declare -a cases=(
   "run_help|run --help"
   "ask_help|ask --help"
   "ask_missing_question|ask"
+  "ask_missing_question_bedrock|ask --provider bedrock --model amazon.nova-lite-v1:0"
+  "ask_missing_question_bedrock_short|ask -p bedrock -m amazon.nova-lite-v1:0"
   "agents_help|agents --help"
   "agents|agents"
   "models_help|models --help"
