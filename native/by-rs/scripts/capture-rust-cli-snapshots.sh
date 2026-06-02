@@ -121,11 +121,13 @@ declare -a cases=(
   "models|models"
   "models_bedrock|models --provider bedrock"
   "models_claude_code|models --provider claude-code"
+  "models_unknown_provider|models --provider bogus"
   "config_help|config --help"
   "sessions_help|sessions --help"
   "sessions_list_help|sessions list --help"
   "sessions_list|sessions list"
   "sessions_prune_help|sessions prune --help"
+  "sessions_prune_missing|sessions prune -s missing"
 )
 
 json_escape() {
