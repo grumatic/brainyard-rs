@@ -146,7 +146,7 @@ fn safe_session_dir_name(session_id: &str) -> Option<&str> {
 
 fn summary_from_meta(dir_id: String, path: PathBuf, meta: &EdnMap) -> SessionSummary {
     SessionSummary {
-        id: meta.string("id").unwrap_or(&dir_id).to_string(),
+        id: dir_id,
         label: meta.string("label").map(ToOwned::to_owned),
         agent: text_value(meta.get("defagent-id")).or_else(|| text_value(meta.get("agent-id"))),
         bytes: dir_size(&path).unwrap_or(0),

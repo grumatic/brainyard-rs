@@ -11,7 +11,7 @@ fn lists_session_dirs_with_optional_meta_edn() {
     std::fs::create_dir_all(&hidden).unwrap();
     std::fs::write(
         alpha.join("meta.edn"),
-        r#"{:id "alpha"
+        r#"{:id "stale-meta-id"
             :label "Alpha session"
             :defagent-id :coact-agent
             :started-at 1780290000000

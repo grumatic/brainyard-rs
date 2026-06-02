@@ -241,6 +241,30 @@ fn run_explicit_existing_resume_reaches_unimplemented_tui() {
 }
 
 #[test]
+fn run_explicit_resume_uses_session_dir_when_meta_id_is_stale() {
+    let home = tempfile::tempdir().unwrap();
+    write_session_meta(
+        home.path(),
+        "alpha",
+        r#"{:id "stale-meta-id"
+            :label "Alpha session"
+            :started-at 1000
+            :last-attached-at 2000}"#,
+    );
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .args(["run", "--resume", "alpha"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("no persisted session named").not());
+}
+
+#[test]
 fn run_select_resume_without_sessions_reaches_unimplemented_tui_without_prompt() {
     let home = tempfile::tempdir().unwrap();
 
@@ -613,7 +637,7 @@ fn sessions_list_reads_fixture_root_without_writing() {
     std::fs::create_dir_all(&session).unwrap();
     std::fs::write(
         session.join("meta.edn"),
-        r#"{:id "alpha"
+        r#"{:id "stale-meta-id"
             :label "Alpha session"
             :defagent-id :coact-agent
             :started-at 1780290000000
@@ -630,6 +654,7 @@ fn sessions_list_reads_fixture_root_without_writing() {
         .success()
         .stdout(predicate::str::contains("session-id"))
         .stdout(predicate::str::contains("alpha"))
+        .stdout(predicate::str::contains("stale-meta-id").not())
         .stdout(predicate::str::contains("Alpha session"))
         .stdout(predicate::str::contains("coact-agent"))
         .stdout(predicate::str::contains("B"));
