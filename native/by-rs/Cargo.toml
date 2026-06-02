@@ -5,6 +5,7 @@ members = [
   "crates/by-contracts",
   "crates/by-llm",
   "crates/by-config",
+  "crates/by-mcp",
   "crates/by-memory",
   "crates/by-persist",
   "crates/by-registry",
@@ -33,6 +34,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 by-contracts = { path = "crates/by-contracts" }
 by-config = { path = "crates/by-config" }
 by-llm = { path = "crates/by-llm" }
+by-mcp = { path = "crates/by-mcp" }
 by-memory = { path = "crates/by-memory" }
 by-persist = { path = "crates/by-persist" }
 by-registry = { path = "crates/by-registry" }

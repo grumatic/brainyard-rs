@@ -700,6 +700,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "by-mcp"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "by-registry",
+ "serde_json",
+]
+
+[[package]]
 name = "by-memory"
 version = "0.0.0"
 dependencies = [
