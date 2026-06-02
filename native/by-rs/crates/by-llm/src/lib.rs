@@ -498,7 +498,7 @@ fn content_block_value(block: &ContentBlock) -> Option<Value> {
     block.as_text().ok().map(|text| json!({"text": text}))
 }
 
-fn projected_response_text(projected: &Value) -> String {
+pub fn projected_response_text(projected: &Value) -> String {
     projected
         .get("content")
         .and_then(Value::as_array)

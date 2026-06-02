@@ -731,7 +731,59 @@ fn ask_help_matches_clojure_command_surface() {
         .stdout(predicate::str::contains("coact-agent  Agent ID"))
         .stdout(predicate::str::contains("claude-code  LM provider"))
         .stdout(predicate::str::contains("--dry-run").not())
-        .stdout(predicate::str::contains("--live").not());
+        .stdout(predicate::str::contains("--live").not())
+        .stdout(predicate::str::contains("--fixture-response").not());
+}
+
+#[test]
+fn ask_fixture_response_replays_bedrock_output_without_network() {
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/bedrock/converse-response.json");
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env_remove("AWS_REGION")
+        .env_remove("AWS_DEFAULT_REGION")
+        .env_remove("AWS_PROFILE")
+        .env_remove("AWS_DEFAULT_PROFILE")
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--fixture-response",
+        ])
+        .arg(fixture)
+        .arg("What is 2+2?")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello world"));
+}
+
+#[test]
+fn ask_fixture_response_rejects_other_execution_modes() {
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/bedrock/converse-response.json");
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "--fixture-response",
+        ])
+        .arg(fixture)
+        .arg("What is 2+2?")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "choose only one of --dry-run, --live, or --fixture-response",
+        ));
 }
 
 #[test]

@@ -119,6 +119,9 @@ enum Commands {
         /// Call Bedrock Converse over the network.
         #[arg(long)]
         live: bool,
+        /// Replay a Bedrock Converse response fixture without network access.
+        #[arg(long = "fixture-response", value_name = "PATH", hide = true)]
+        fixture_response: Option<PathBuf>,
         /// Question to ask. Also accepts the legacy positional provider:model token.
         #[arg(value_name = "QUESTION", num_args = 1..)]
         question: Vec<String>,
@@ -325,6 +328,7 @@ fn run() -> Result<()> {
             no_prompt_cache,
             dry_run,
             live,
+            fixture_response,
             question,
         } => print_ask(AskRequest {
             provider,
@@ -336,6 +340,7 @@ fn run() -> Result<()> {
             no_prompt_cache,
             dry_run,
             live,
+            fixture_response,
             question,
         }),
         Commands::Agents { fixture } => print_agents(fixture),
@@ -657,6 +662,7 @@ struct AskRequest {
     no_prompt_cache: bool,
     dry_run: bool,
     live: bool,
+    fixture_response: Option<PathBuf>,
     question: Vec<String>,
 }
 
@@ -664,7 +670,10 @@ fn print_ask(args: AskRequest) -> Result<()> {
     if args.dry_run && args.live {
         bail!("choose only one of --dry-run or --live");
     }
-    if !args.dry_run && !args.live {
+    if args.fixture_response.is_some() && (args.dry_run || args.live) {
+        bail!("choose only one of --dry-run, --live, or --fixture-response");
+    }
+    if !args.dry_run && !args.live && args.fixture_response.is_none() {
         bail!("by-rs ask requires --dry-run or --live");
     }
 
@@ -720,6 +729,27 @@ fn print_ask(args: AskRequest) -> Result<()> {
             "request": request,
         });
         println!("{}", serde_json::to_string_pretty(&dry_run)?);
+        return Ok(());
+    }
+
+    if let Some(path) = args.fixture_response {
+        let raw: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).with_context(|| {
+                format!("failed to read Bedrock response fixture {}", path.display())
+            })?)
+            .with_context(|| {
+                format!(
+                    "failed to parse Bedrock response fixture {}",
+                    path.display()
+                )
+            })?;
+        let projected = by_llm::reshape_bedrock_response(raw);
+        let text = by_llm::projected_response_text(&projected);
+        if text.is_empty() {
+            println!("{}", serde_json::to_string_pretty(&projected)?);
+        } else {
+            println!("{text}");
+        }
         return Ok(());
     }
 
