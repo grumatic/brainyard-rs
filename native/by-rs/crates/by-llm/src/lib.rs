@@ -53,6 +53,20 @@ pub struct BedrockConverseResponse {
     pub stop_reason: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProviderChatConfig {
+    pub model: String,
+    pub temperature: Option<f64>,
+    pub max_tokens: Option<u32>,
+    pub drop_temperature: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProviderRequestProjection {
+    pub operation: &'static str,
+    pub request: Value,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BedrockRuntimeInputs {
     pub explicit_region: Option<String>,
@@ -92,6 +106,66 @@ impl ChatMessage {
 
 pub fn build_bedrock_request(config: &BedrockConfig, messages: &[ChatMessage]) -> Value {
     build_bedrock_request_with_cache_zones(config, messages, &[])
+}
+
+pub fn build_openai_compatible_request(
+    config: &ProviderChatConfig,
+    messages: &[ChatMessage],
+) -> Value {
+    let mut request = Map::new();
+    request.insert("model".to_string(), Value::String(config.model.clone()));
+    request.insert("messages".to_string(), openai_messages(messages));
+
+    if let Some(temperature) = config.temperature {
+        if !config.drop_temperature {
+            request.insert("temperature".to_string(), json!(temperature));
+        }
+    }
+    if let Some(max_tokens) = config.max_tokens {
+        request.insert("max_tokens".to_string(), json!(max_tokens));
+    }
+
+    Value::Object(request)
+}
+
+pub fn build_anthropic_request(config: &ProviderChatConfig, messages: &[ChatMessage]) -> Value {
+    let mut request = Map::new();
+    request.insert("model".to_string(), Value::String(config.model.clone()));
+    if let Some(system_text) = collect_system_text(messages) {
+        request.insert("system".to_string(), Value::String(system_text));
+    }
+    request.insert("messages".to_string(), anthropic_messages(messages));
+    request.insert(
+        "max_tokens".to_string(),
+        json!(config.max_tokens.unwrap_or(4096)),
+    );
+
+    if let Some(temperature) = config.temperature {
+        if !config.drop_temperature {
+            request.insert("temperature".to_string(), json!(temperature));
+        }
+    }
+
+    Value::Object(request)
+}
+
+pub fn build_provider_request(
+    provider: &str,
+    config: &ProviderChatConfig,
+    messages: &[ChatMessage],
+) -> Result<ProviderRequestProjection> {
+    match provider.trim() {
+        "anthropic" | "anthropic-max" => Ok(ProviderRequestProjection {
+            operation: "messages",
+            request: build_anthropic_request(config, messages),
+        }),
+        "openai" | "google" | "azure" | "groq" | "together" | "fireworks" | "openrouter"
+        | "ollama" | "mistral" | "deepseek" | "apple-fm" => Ok(ProviderRequestProjection {
+            operation: "chat/completions",
+            request: build_openai_compatible_request(config, messages),
+        }),
+        other => bail!("dry-run request shaping does not support provider '{other}'"),
+    }
 }
 
 pub fn build_bedrock_request_with_cache_zones(
@@ -362,6 +436,35 @@ fn convert_converse_messages(messages: &[ChatMessage]) -> Vec<Value> {
             })
         })
         .collect()
+}
+
+fn openai_messages(messages: &[ChatMessage]) -> Value {
+    Value::Array(
+        messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "role": message.role,
+                    "content": message.content,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn anthropic_messages(messages: &[ChatMessage]) -> Value {
+    Value::Array(
+        messages
+            .iter()
+            .filter(|message| message.role != "system")
+            .map(|message| {
+                json!({
+                    "role": message.role,
+                    "content": message.content,
+                })
+            })
+            .collect(),
+    )
 }
 
 fn append_cache_point_to_last_user(messages: &mut [Value]) {

@@ -722,11 +722,37 @@ fn print_ask(args: AskRequest) -> Result<()> {
         return Ok(());
     }
 
+    let messages = vec![by_llm::ChatMessage::user(question)];
+    let dotenv = by_config::load_process_dotenv()?;
+
+    if args.dry_run && resolved_provider != "bedrock" {
+        let drop_temperature = by_llm::bedrock_drops_temperature(&model);
+        let config = by_llm::ProviderChatConfig {
+            model,
+            temperature: Some(args.temperature),
+            max_tokens: args.max_tokens,
+            drop_temperature,
+        };
+        let projection = by_llm::build_provider_request(&resolved_provider, &config, &messages)?;
+        let user_id =
+            by_config::resolve_process_user_id_with_dotenv(args.user_id.as_deref(), &dotenv);
+        let dry_run = serde_json::json!({
+            "provider": resolved_provider,
+            "operation": projection.operation,
+            "network": false,
+            "agent_session": {
+                "user_id": user_id,
+            },
+            "request": projection.request,
+        });
+        println!("{}", serde_json::to_string_pretty(&dry_run)?);
+        return Ok(());
+    }
+
     if resolved_provider != "bedrock" {
         bail!("by-rs ask currently supports provider 'bedrock' only");
     }
 
-    let dotenv = by_config::load_process_dotenv()?;
     let runtime = by_llm::resolve_bedrock_runtime_options(by_llm::BedrockRuntimeInputs {
         explicit_region: args.region,
         aws_region: by_config::process_env_or_dotenv(&dotenv, "AWS_REGION"),
@@ -743,7 +769,6 @@ fn print_ask(args: AskRequest) -> Result<()> {
         prompt_cache: !args.no_prompt_cache && by_llm::bedrock_supports_prompt_cache(&model),
         drop_temperature: by_llm::bedrock_drops_temperature(&model),
     };
-    let messages = vec![by_llm::ChatMessage::user(question)];
 
     if args.dry_run {
         let request = by_llm::build_bedrock_request(&config, &messages);

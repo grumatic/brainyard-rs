@@ -854,6 +854,86 @@ fn ask_dry_run_renders_bedrock_converse_request_without_network() {
 }
 
 #[test]
+fn ask_dry_run_renders_openai_chat_completions_request_without_network() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "ask",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o",
+            "--temperature",
+            "0.2",
+            "--max-tokens",
+            "64",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"openai\""))
+        .stdout(predicate::str::contains(
+            "\"operation\": \"chat/completions\"",
+        ))
+        .stdout(predicate::str::contains("\"network\": false"))
+        .stdout(predicate::str::contains("\"model\": \"gpt-4o\""))
+        .stdout(predicate::str::contains("\"temperature\": 0.2"))
+        .stdout(predicate::str::contains("\"max_tokens\": 64"))
+        .stdout(predicate::str::contains("\"role\": \"user\""))
+        .stdout(predicate::str::contains("\"content\": \"What is 2+2?\""));
+}
+
+#[test]
+fn ask_dry_run_drops_openai_temperature_for_gpt5_family() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "ask",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5",
+            "--temperature",
+            "0.2",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"openai\""))
+        .stdout(predicate::str::contains("\"model\": \"gpt-5\""))
+        .stdout(predicate::str::contains("\"temperature\"").not());
+}
+
+#[test]
+fn ask_dry_run_renders_anthropic_messages_request_without_network() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "ask",
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-sonnet-4-5",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"anthropic\""))
+        .stdout(predicate::str::contains("\"operation\": \"messages\""))
+        .stdout(predicate::str::contains("\"network\": false"))
+        .stdout(predicate::str::contains("\"model\": \"claude-sonnet-4-5\""))
+        .stdout(predicate::str::contains("\"max_tokens\": 4096"))
+        .stdout(predicate::str::contains("\"role\": \"user\""))
+        .stdout(predicate::str::contains("\"content\": \"What is 2+2?\""));
+}
+
+#[test]
 fn ask_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
