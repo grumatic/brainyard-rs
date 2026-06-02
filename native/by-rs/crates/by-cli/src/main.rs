@@ -2056,6 +2056,7 @@ fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()>
         eprintln!("Non-interactive stdin detected. Use --auto for non-interactive runs.");
         std::process::exit(2);
     }
+    validate_config_profile(opts.profile.as_deref());
 
     let projection = serde_json::json!({
         "operation": "config",
@@ -2072,6 +2073,20 @@ fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()>
     });
     println!("{}", serde_json::to_string_pretty(&projection)?);
     Ok(())
+}
+
+fn validate_config_profile(profile: Option<&str>) {
+    const KNOWN_PROFILES: [&str; 4] = ["ci", "cloud", "dev", "offline"];
+    let Some(profile) = profile else {
+        return;
+    };
+    if KNOWN_PROFILES.contains(&profile) {
+        return;
+    }
+
+    eprintln!("Unknown profile: :{profile}");
+    eprintln!("  Known profiles: {}", KNOWN_PROFILES.join(", "));
+    std::process::exit(2);
 }
 
 fn print_config(path: Option<PathBuf>) -> Result<()> {

@@ -1764,6 +1764,20 @@ fn config_requires_auto_when_stdin_is_non_interactive() {
 }
 
 #[test]
+fn config_rejects_unknown_profile_like_clojure() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["config", "--auto", "--profile", "bogus", "--dry-run"])
+        .assert()
+        .code(2)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Unknown profile: :bogus"))
+        .stderr(predicate::str::contains(
+            "Known profiles: ci, cloud, dev, offline",
+        ));
+}
+
+#[test]
 fn config_bootstrap_projection_stays_read_only() {
     Command::cargo_bin("by-rs")
         .unwrap()
