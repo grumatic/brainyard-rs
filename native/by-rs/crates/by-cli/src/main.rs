@@ -3,10 +3,40 @@
 use anyhow::{bail, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use std::io::IsTerminal;
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
+use std::process::{Command as ProcessCommand, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const RESUME_LATEST_SENTINEL: &str = "--by-resume-latest--";
+const TMUX_NEED_SESSION_GUIDANCE: &str =
+    "You passed --with-tmux, but you're not currently inside a tmux session.
+For tmux side panes (activity, log) and popup dialogs, start a tmux
+session and re-run `by` from inside it:
+
+    tmux new -s brainyard
+    by --with-tmux
+
+Or drop --with-tmux to run the in-process TUI without tmux integration:
+
+    by\n";
+const TMUX_NEED_TMUX_GUIDANCE: &str = "You passed --with-tmux, but `tmux` is not on $PATH.
+Install tmux, then re-run from inside a tmux session:
+
+    # macOS
+    brew install tmux
+    # Debian/Ubuntu
+    sudo apt-get install tmux
+
+Or drop --with-tmux to run the in-process TUI without tmux integration:
+
+    by\n";
+const TMUX_SERVER_DEAD_GUIDANCE: &str =
+    "You passed --with-tmux and $TMUX is set, but the tmux server isn't
+responding (it may have been killed or the system was suspended).
+Start a fresh tmux session:
+
+    tmux new -s brainyard
+    by --with-tmux\n";
 
 #[derive(Debug, Parser)]
 #[command(name = "by")]
@@ -501,7 +531,7 @@ fn run() -> Result<()> {
             no_inline: _no_inline,
             verbose: _verbose,
             no_verbose: _no_verbose,
-            with_tmux: _with_tmux,
+            with_tmux,
             no_with_tmux: _no_with_tmux,
             max_iterations: _max_iterations,
             resume,
@@ -512,6 +542,7 @@ fn run() -> Result<()> {
             positional: _positional,
         } => {
             preflight_run_resume(resume.as_deref())?;
+            preflight_run_tmux(with_tmux);
             bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
         }
         Commands::Ask {
@@ -2385,6 +2416,80 @@ fn preflight_run_resume(resume: Option<&str>) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn preflight_run_tmux(with_tmux: bool) {
+    if !with_tmux {
+        return;
+    }
+
+    let Some(_tmux) = find_command_on_path("tmux") else {
+        eprint!("{TMUX_NEED_TMUX_GUIDANCE}");
+        std::process::exit(1);
+    };
+
+    let tmux_env = std::env::var("TMUX").unwrap_or_default();
+    if tmux_env.trim().is_empty() {
+        eprint!("{TMUX_NEED_SESSION_GUIDANCE}");
+        std::process::exit(1);
+    }
+
+    if !tmux_server_alive("tmux", &tmux_env) {
+        eprint!("{TMUX_SERVER_DEAD_GUIDANCE}");
+        std::process::exit(1);
+    }
+}
+
+fn find_command_on_path(command: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths)
+            .map(|dir| dir.join(command))
+            .find(|path| is_executable_file(path))
+    })
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.metadata()
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn tmux_server_alive(tmux: &str, tmux_env: &str) -> bool {
+    let socket = tmux_env.split(',').next().unwrap_or_default();
+    if socket.trim().is_empty() {
+        return false;
+    }
+
+    let Ok(mut child) = ProcessCommand::new(tmux)
+        .args(["-S", socket, "display", "-p", "#{client_pid}"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+
+    let deadline = Instant::now() + Duration::from_millis(200);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => return false,
+        }
+    }
 }
 
 fn print_sessions(root: Option<PathBuf>) -> Result<()> {

@@ -1,6 +1,37 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use rusqlite::Connection;
+use std::path::Path;
+
+const TMUX_NEED_SESSION_GUIDANCE: &str =
+    "You passed --with-tmux, but you're not currently inside a tmux session.
+For tmux side panes (activity, log) and popup dialogs, start a tmux
+session and re-run `by` from inside it:
+
+    tmux new -s brainyard
+    by --with-tmux
+
+Or drop --with-tmux to run the in-process TUI without tmux integration:
+
+    by\n";
+const TMUX_NEED_TMUX_GUIDANCE: &str = "You passed --with-tmux, but `tmux` is not on $PATH.
+Install tmux, then re-run from inside a tmux session:
+
+    # macOS
+    brew install tmux
+    # Debian/Ubuntu
+    sudo apt-get install tmux
+
+Or drop --with-tmux to run the in-process TUI without tmux integration:
+
+    by\n";
+const TMUX_SERVER_DEAD_GUIDANCE: &str =
+    "You passed --with-tmux and $TMUX is set, but the tmux server isn't
+responding (it may have been killed or the system was suspended).
+Start a fresh tmux session:
+
+    tmux new -s brainyard
+    by --with-tmux\n";
 
 fn assert_json_error(args: &[&str], expected: &str) {
     let assert = Command::cargo_bin("by-rs")
@@ -12,6 +43,22 @@ fn assert_json_error(args: &[&str], expected: &str) {
     let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
     assert_eq!(value["error"], expected);
+}
+
+fn link_fake_executable(path: &Path, target: &str) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, path).unwrap();
+
+    #[cfg(not(unix))]
+    std::fs::copy(target, path).unwrap();
+}
+
+fn system_binary(candidates: &[&'static str]) -> &'static str {
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| Path::new(candidate).exists())
+        .expect("expected a system binary for tmux probe fixture")
 }
 
 #[test]
@@ -185,6 +232,115 @@ fn run_explicit_existing_resume_reaches_unimplemented_tui() {
         .stdout(predicate::str::is_empty())
         .stderr(predicate::str::contains("by-rs run is not implemented yet"))
         .stderr(predicate::str::contains("no persisted session named").not());
+}
+
+#[test]
+fn run_with_tmux_without_tmux_binary_matches_clojure_guidance() {
+    let path_dir = tempfile::tempdir().unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("PATH", path_dir.path())
+        .env_remove("TMUX")
+        .args(["run", "--with-tmux"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet").not());
+
+    assert_eq!(
+        String::from_utf8(assert.get_output().stderr.clone()).unwrap(),
+        TMUX_NEED_TMUX_GUIDANCE
+    );
+}
+
+#[test]
+fn run_with_tmux_without_tmux_env_matches_clojure_guidance() {
+    let path_dir = tempfile::tempdir().unwrap();
+    link_fake_executable(
+        &path_dir.path().join("tmux"),
+        system_binary(&["/usr/bin/true", "/bin/true"]),
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("PATH", path_dir.path())
+        .env_remove("TMUX")
+        .args(["run", "--with-tmux"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet").not());
+
+    assert_eq!(
+        String::from_utf8(assert.get_output().stderr.clone()).unwrap(),
+        TMUX_NEED_SESSION_GUIDANCE
+    );
+}
+
+#[test]
+fn run_with_tmux_dead_server_matches_clojure_guidance() {
+    let path_dir = tempfile::tempdir().unwrap();
+    link_fake_executable(
+        &path_dir.path().join("tmux"),
+        system_binary(&["/usr/bin/false", "/bin/false"]),
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("PATH", path_dir.path())
+        .env("TMUX", "/tmp/dead,123,0")
+        .args(["run", "--with-tmux"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet").not());
+
+    assert_eq!(
+        String::from_utf8(assert.get_output().stderr.clone()).unwrap(),
+        TMUX_SERVER_DEAD_GUIDANCE
+    );
+}
+
+#[test]
+fn run_with_tmux_live_server_reaches_unimplemented_tui() {
+    let path_dir = tempfile::tempdir().unwrap();
+    link_fake_executable(
+        &path_dir.path().join("tmux"),
+        system_binary(&["/usr/bin/true", "/bin/true"]),
+    );
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("PATH", path_dir.path())
+        .env("TMUX", "/tmp/live,123,0")
+        .args(["run", "--with-tmux"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("You passed --with-tmux").not());
+}
+
+#[test]
+fn run_no_with_tmux_does_not_trigger_tmux_preflight() {
+    let path_dir = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("PATH", path_dir.path())
+        .env_remove("TMUX")
+        .args(["run", "--no-with-tmux"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
+        .stderr(predicate::str::contains("You passed --with-tmux").not());
 }
 
 #[test]
