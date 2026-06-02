@@ -164,6 +164,26 @@ pub fn resolve_default_config_path(dirs: &BrainyardDirs) -> Option<PathBuf> {
         .map(|user_dir| user_dir.join(".brainyard/config.edn"))
 }
 
+pub fn user_config_dir(dirs: &BrainyardDirs) -> Option<PathBuf> {
+    dirs.user_dir
+        .as_ref()
+        .map(|user_dir| user_dir.join(".brainyard"))
+}
+
+pub fn project_config_dir(dirs: &BrainyardDirs) -> PathBuf {
+    dirs.project_dir.join(".brainyard")
+}
+
+pub fn default_allowed_dirs(dirs: &BrainyardDirs) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    push_distinct_path(&mut paths, PathBuf::from("/tmp"));
+    push_distinct_path(&mut paths, dirs.project_dir.clone());
+    if let Some(user_config_dir) = user_config_dir(dirs) {
+        push_distinct_path(&mut paths, user_config_dir);
+    }
+    paths
+}
+
 pub fn resolve_user_id(inputs: UserIdInputs<'_>) -> String {
     first_non_blank([
         inputs.explicit,

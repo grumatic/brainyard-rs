@@ -1,6 +1,7 @@
 use by_config::{
-    load_dotenv_values, read_config, resolve_default_config_path, resolve_user_id, AgentConfig,
-    BrainyardDirs, LlmConfig, PermissionsConfig, UserIdInputs,
+    default_allowed_dirs, load_dotenv_values, project_config_dir, read_config,
+    resolve_default_config_path, resolve_user_id, user_config_dir, AgentConfig, BrainyardDirs,
+    LlmConfig, PermissionsConfig, UserIdInputs,
 };
 use std::fs;
 
@@ -218,6 +219,42 @@ fn default_config_path_honors_project_dir_override() {
     let dirs = BrainyardDirs::resolve(cwd.path(), Some(home.path()), Some(override_project.path()));
 
     assert_eq!(resolve_default_config_path(&dirs), Some(project_config));
+}
+
+#[test]
+fn config_dir_helpers_match_clojure_directory_contract() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let dirs = BrainyardDirs::resolve(project.path(), Some(home.path()), None::<&std::path::Path>);
+
+    assert_eq!(project_config_dir(&dirs), project.path().join(".brainyard"));
+    assert_eq!(user_config_dir(&dirs), Some(home.path().join(".brainyard")));
+}
+
+#[test]
+fn default_allowed_dirs_match_clojure_defaults() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let dirs = BrainyardDirs::resolve(project.path(), Some(home.path()), None::<&std::path::Path>);
+
+    assert_eq!(
+        default_allowed_dirs(&dirs),
+        vec![
+            std::path::PathBuf::from("/tmp"),
+            project.path().to_path_buf(),
+            home.path().join(".brainyard"),
+        ]
+    );
+}
+
+#[test]
+fn default_allowed_dirs_drop_missing_user_dir_and_duplicates() {
+    let dirs = BrainyardDirs::resolve("/tmp", None::<&std::path::Path>, Some("/tmp"));
+
+    assert_eq!(
+        default_allowed_dirs(&dirs),
+        vec![std::path::PathBuf::from("/tmp")]
+    );
 }
 
 #[test]
