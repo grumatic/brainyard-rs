@@ -52,6 +52,20 @@ fn top_version_flags_are_not_routed_to_run_command() {
 }
 
 #[test]
+fn short_h_is_not_a_clojure_help_alias() {
+    for args in [vec!["-h"], vec!["run", "-h"]] {
+        Command::cargo_bin("by-rs")
+            .unwrap()
+            .args(args)
+            .assert()
+            .code(255)
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::contains("Unknown option: \"-h\""))
+            .stderr(predicate::str::contains("NAME:\n by"));
+    }
+}
+
+#[test]
 fn run_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()

@@ -474,11 +474,15 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    if print_compat_help_if_requested(std::env::args().skip(1)) {
+    let raw_args = std::env::args().collect::<Vec<_>>();
+    let user_args = &raw_args[1..];
+    exit_compat_short_h_error_if_requested(user_args);
+
+    if print_compat_help_if_requested(user_args.iter().cloned()) {
         return Ok(());
     }
 
-    let cli = Cli::parse_from(normalize_default_run_args(std::env::args()));
+    let cli = Cli::parse_from(normalize_default_run_args(raw_args));
     match cli.command {
         Commands::Run {
             agent: _agent,
@@ -754,7 +758,68 @@ where
 }
 
 fn is_help_flag(flag: &str) -> bool {
-    matches!(flag, "--help" | "-h" | "-?")
+    matches!(flag, "--help" | "-?")
+}
+
+fn exit_compat_short_h_error_if_requested(args: &[String]) {
+    if !args.iter().any(|arg| arg == "-h") {
+        return;
+    }
+
+    let (error, help) = match args {
+        [flag] if flag == "-h" => (
+            "Global option error: Unknown option: \"-h\"",
+            top_level_help(),
+        ),
+        [command, flag] if command == "run" && flag == "-h" => (
+            "Option error: Unknown option: \"-h\"",
+            run_help().to_string(),
+        ),
+        [command, flag] if command == "ask" && flag == "-h" => (
+            "Option error: Unknown option: \"-h\"",
+            ask_help().to_string(),
+        ),
+        [command, flag] if command == "agents" && flag == "-h" => (
+            "Option error: Unknown option: \"-h\"",
+            agents_help().to_string(),
+        ),
+        [command, flag] if command == "models" && flag == "-h" => (
+            "Option error: Unknown option: \"-h\"",
+            models_help().to_string(),
+        ),
+        [command, flag] if command == "config" && flag == "-h" => (
+            "Option error: Unknown option: \"-h\"",
+            config_help().to_string(),
+        ),
+        [command, flag] if command == "sessions" && flag == "-h" => (
+            "Global option error: Unknown option: \"-h\"",
+            sessions_help().to_string(),
+        ),
+        [command, subcommand, flag]
+            if command == "sessions" && subcommand == "list" && flag == "-h" =>
+        {
+            (
+                "Option error: Unknown option: \"-h\"",
+                sessions_list_help().to_string(),
+            )
+        }
+        [command, subcommand, flag]
+            if command == "sessions" && subcommand == "prune" && flag == "-h" =>
+        {
+            (
+                "Option error: Unknown option: \"-h\"",
+                sessions_prune_help().to_string(),
+            )
+        }
+        _ => return,
+    };
+
+    eprintln!("** ERROR: **");
+    eprintln!("{error}");
+    eprintln!();
+    eprintln!();
+    eprint!("{help}");
+    std::process::exit(255);
 }
 
 fn is_version_flag(flag: &str) -> bool {

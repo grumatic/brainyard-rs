@@ -112,6 +112,8 @@ mkdir -p "$project_dir"
 
 declare -a cases=(
   "top_help|--help"
+  "top_help_short|-h"
+  "top_help_question|-?"
   "top_version_long|--version"
   "top_version_short|-V"
   "run_help|run --help"
@@ -122,6 +124,7 @@ declare -a cases=(
   "models_help|models --help"
   "models|models"
   "models_bedrock|models --provider bedrock"
+  "models_bedrock_short|models -p bedrock"
   "models_claude_code|models --provider claude-code"
   "models_unknown_provider|models --provider bogus"
   "config_help|config --help"
@@ -130,6 +133,7 @@ declare -a cases=(
   "sessions_list|sessions list"
   "sessions_prune_help|sessions prune --help"
   "sessions_prune_missing|sessions prune -s missing"
+  "sessions_prune_missing_positional|sessions prune missing"
 )
 
 json_escape() {
