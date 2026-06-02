@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-out_dir="$repo_root/native/by-rs/fixtures/cli-snapshots/clojure"
+out_dir="$repo_root/native/by-rs/target/cli-snapshots/clojure"
 bin_path="${BY_CLOJURE_BIN:-}"
 runner_command="${BY_CLOJURE_RUNNER:-}"
 fixture_home=""
@@ -161,7 +161,7 @@ capture_case() {
       HOME="$fixture_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        bash -lc "$command"
+        bash -lc "$command" </dev/null
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   else
     (
@@ -169,7 +169,7 @@ capture_case() {
       HOME="$fixture_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        "$bin_path" "$@"
+        "$bin_path" "$@" </dev/null
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   fi
   printf '%s\n' "$status" >"$status_file"

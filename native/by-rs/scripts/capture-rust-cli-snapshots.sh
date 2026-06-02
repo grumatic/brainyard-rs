@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 native_root="$repo_root/native/by-rs"
-out_dir="$native_root/fixtures/cli-snapshots/rust"
+out_dir="$native_root/target/cli-snapshots/rust"
 bin_path="${BY_RUST_BIN:-}"
 runner_command="${BY_RUST_RUNNER:-}"
 fixture_home=""
@@ -161,7 +161,7 @@ capture_case() {
       RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        bash -lc "$command"
+        bash -lc "$command" </dev/null
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   else
     (
@@ -171,7 +171,7 @@ capture_case() {
       RUSTUP_HOME="$rustup_home" \
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
-        "$bin_path" "$@"
+        "$bin_path" "$@" </dev/null
     ) >"$stdout_file" 2>"$stderr_file" || status=$?
   fi
   printf '%s\n' "$status" >"$status_file"

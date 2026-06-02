@@ -1,7 +1,8 @@
 # CLI Snapshot Fixtures
 
-This directory is the default output target for Clojure `by` CLI snapshots used
-by the Rust port parity harness. Generate snapshots with:
+This directory documents the CLI snapshot parity harness. Generated Clojure and
+Rust snapshots default to `native/by-rs/target/cli-snapshots/...` so local
+checks do not dirty the Git worktree. Generate Clojure snapshots with:
 
 ```bash
 native/by-rs/scripts/capture-clojure-cli-snapshots.sh \
@@ -19,8 +20,8 @@ native/by-rs/scripts/capture-clojure-cli-snapshots.sh --runner "bb tui"
 The capture script uses an isolated temporary `HOME` by default so read-only
 snapshots do not touch the developer's real `~/.brainyard` state.
 
-For local parity checks, keep generated snapshots under `target/` and compare
-the Clojure and Rust outputs:
+For local parity checks, capture both Clojure and Rust outputs, then compare
+them:
 
 ```bash
 native/by-rs/scripts/capture-clojure-cli-snapshots.sh \
