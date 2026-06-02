@@ -13,10 +13,12 @@
    or load this ns in the project's dev nREPL and `(run-tests)`."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.brainyard.agent-tui-app.dotenv :as dotenv]
    [ai.brainyard.agent-tui-app.main :as main]))
 
 (def ^:private inject @#'main/inject-bare-resume-sentinel)
 (def ^:private sentinel @#'main/resume-latest-sentinel)
+(def ^:private app-version @#'main/app-version)
 
 (deftest inject-bare-resume-sentinel-test
   (testing "bare --resume / -r (no value) gets the sentinel spliced in"
@@ -44,3 +46,10 @@
   ;; Real session ids are timestamp/uuid-shaped (e.g. "agt-1780236629321-928")
   ;; — the sentinel's leading dashes guarantee no overlap.
   (is (re-find #"^--" sentinel)))
+
+(deftest top-version-flags-bypass-default-run-routing
+  (with-redefs [dotenv/load-from-dotenv! (fn [] {:paths [] :loaded-count 0})]
+    (doseq [flag ["--version" "-V"]]
+      (testing flag
+        (is (= (str "by " app-version "\n")
+               (with-out-str (main/-main flag))))))))
