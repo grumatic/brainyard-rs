@@ -1005,6 +1005,10 @@
                   "--diff"
                   "--diff-lines" "80"))}
 
+  by-rs:bedrock-smoke
+  {:doc "Run Rust port Bedrock ask smoke. Dry-run by default; pass --live or set BY_RS_BEDROCK_LIVE=1 for network."
+   :task (apply shell "native/by-rs/scripts/bedrock-live-smoke.sh" *command-line-args*)}
+
   by-rs:verify
   {:doc "Run Rust port fmt check, clippy, and workspace tests"
    :task (do

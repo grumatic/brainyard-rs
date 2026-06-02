@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use by_persist::list_sessions;
 use predicates::prelude::*;
 use rusqlite::Connection;
 use std::path::Path;
@@ -65,6 +66,24 @@ fn write_session_meta(home: &Path, session_id: &str, meta: &str) {
     let session_dir = home.join(".brainyard/sessions").join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     std::fs::write(session_dir.join("meta.edn"), meta).unwrap();
+}
+
+fn read_session_meta(home: &Path, session_id: &str) -> String {
+    std::fs::read_to_string(
+        home.join(".brainyard/sessions")
+            .join(session_id)
+            .join("meta.edn"),
+    )
+    .unwrap()
+}
+
+fn read_session_messages(home: &Path, session_id: &str) -> String {
+    std::fs::read_to_string(
+        home.join(".brainyard/sessions")
+            .join(session_id)
+            .join("messages.log"),
+    )
+    .unwrap()
 }
 
 #[test]
@@ -136,19 +155,36 @@ fn run_help_matches_clojure_command_surface() {
 
 #[test]
 fn no_args_defaults_to_run_command() {
+    let home = tempfile::tempdir().unwrap();
+
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-default")
         .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("Usage:").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("agent coact-agent"))
+        .stdout(predicate::str::contains("model claude-code"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::is_empty());
+
+    let meta = read_session_meta(home.path(), "agt-default");
+    assert!(meta.contains(r#":user-id ""#));
+    assert!(meta.contains(":agent-id :coact-agent"));
+    assert!(meta.contains(":defagent-id :coact-agent"));
+    assert!(meta.contains(":started-at "));
+    assert!(meta.contains(":last-attached-at "));
 }
 
 #[test]
 fn root_level_run_flags_are_routed_to_run_command() {
+    let home = tempfile::tempdir().unwrap();
+
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-root")
         .args([
             "--inline",
             "--no-inline",
@@ -172,22 +208,44 @@ fn root_level_run_flags_are_routed_to_run_command() {
             "alice",
         ])
         .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("unexpected argument").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("agent coact-agent"))
+        .stdout(predicate::str::contains(
+            "model bedrock:amazon.nova-lite-v1:0",
+        ))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("unexpected argument").not())
+        .stderr(predicate::str::is_empty());
+
+    let meta = read_session_meta(home.path(), "agt-root");
+    assert!(meta.contains(r#":user-id "alice""#));
+    assert!(meta.contains(":agent-id :coact-agent"));
+    assert!(meta.contains(":defagent-id :coact-agent"));
+    assert!(meta.contains(":working-dir "));
 }
 
 #[test]
 fn bare_agent_id_is_routed_to_run_command() {
+    let home = tempfile::tempdir().unwrap();
+
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-bare")
         .arg("coact-agent")
         .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("unrecognized subcommand").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("agent coact-agent"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("unrecognized subcommand").not())
+        .stderr(predicate::str::is_empty());
+
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-bare/meta.edn")
+        .is_file());
 }
 
 #[test]
@@ -197,12 +255,19 @@ fn run_accepts_bare_resume_flag_like_clojure() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-bare-resume")
         .args(["run", "--resume"])
         .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("a value is required").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("a value is required").not())
+        .stderr(predicate::str::is_empty());
+
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-bare-resume/meta.edn")
+        .is_file());
 }
 
 #[test]
@@ -226,7 +291,7 @@ fn run_explicit_missing_resume_matches_clojure_error() {
 }
 
 #[test]
-fn run_explicit_existing_resume_reaches_unimplemented_tui() {
+fn run_explicit_existing_resume_reaches_preview_tui() {
     let home = tempfile::tempdir().unwrap();
     let session_dir = home.path().join(".brainyard/sessions/alpha");
     std::fs::create_dir_all(&session_dir).unwrap();
@@ -236,11 +301,16 @@ fn run_explicit_existing_resume_reaches_unimplemented_tui() {
         .env("HOME", home.path())
         .args(["run", "--resume", "alpha"])
         .assert()
-        .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("no persisted session named").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("resume alpha"))
+        .stderr(predicate::str::contains("no persisted session named").not())
+        .stderr(predicate::str::is_empty());
+
+    let sessions = list_sessions(home.path().join(".brainyard/sessions")).unwrap();
+    assert_eq!(sessions[0].id, "alpha");
+    assert!(sessions[0].started_at_millis.is_some());
+    assert!(sessions[0].last_attached_at_millis.is_some());
 }
 
 #[test]
@@ -260,27 +330,39 @@ fn run_explicit_resume_uses_session_dir_when_meta_id_is_stale() {
         .env("HOME", home.path())
         .args(["run", "--resume", "alpha"])
         .assert()
-        .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("no persisted session named").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("resume alpha"))
+        .stderr(predicate::str::contains("no persisted session named").not())
+        .stderr(predicate::str::is_empty());
+
+    let sessions = list_sessions(home.path().join(".brainyard/sessions")).unwrap();
+    assert_eq!(sessions[0].id, "alpha");
+    assert_eq!(sessions[0].label.as_deref(), Some("Alpha session"));
+    assert_eq!(sessions[0].started_at_millis, Some(1000));
+    assert!(sessions[0].last_attached_at_millis.unwrap() >= 2000);
 }
 
 #[test]
-fn run_select_resume_without_sessions_reaches_unimplemented_tui_without_prompt() {
+fn run_select_resume_without_sessions_reaches_preview_tui_without_prompt() {
     let home = tempfile::tempdir().unwrap();
 
     Command::cargo_bin("by-rs")
         .unwrap()
         .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-select-empty")
         .args(["run", "--select-resume"])
         .assert()
-        .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("no persisted session named").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("no persisted session named").not())
+        .stderr(predicate::str::is_empty());
+
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-select-empty/meta.edn")
+        .is_file());
 }
 
 #[test]
@@ -290,13 +372,19 @@ fn run_select_resume_takes_precedence_over_explicit_missing_resume() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-select-new")
         .args(["run", "--select-resume", "--resume", "missing"])
         .assert()
-        .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("no persisted session named").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("no persisted session named").not())
+        .stderr(predicate::str::is_empty());
+
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-select-new/meta.edn")
+        .is_file());
 }
 
 #[test]
@@ -324,12 +412,12 @@ fn run_select_resume_prints_clojure_style_picker_before_tui() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()
         .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-picked-new")
         .args(["run", "--select-resume"])
         .write_stdin("N\n")
         .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"));
+        .success()
+        .stderr(predicate::str::is_empty());
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(
@@ -342,6 +430,10 @@ fn run_select_resume_prints_clojure_style_picker_before_tui() {
         stdout.find("newer").unwrap() < stdout.find("older").unwrap(),
         "newest session should be listed first: {stdout}"
     );
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-picked-new/meta.edn")
+        .is_file());
 }
 
 #[test]
@@ -416,7 +508,8 @@ fn run_with_tmux_dead_server_matches_clojure_guidance() {
 }
 
 #[test]
-fn run_with_tmux_live_server_reaches_unimplemented_tui() {
+fn run_with_tmux_live_server_reaches_preview_tui() {
+    let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
     link_fake_executable(
         &path_dir.path().join("tmux"),
@@ -425,32 +518,164 @@ fn run_with_tmux_live_server_reaches_unimplemented_tui() {
 
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-tmux")
         .env("PATH", path_dir.path())
         .env("TMUX", "/tmp/live,123,0")
         .args(["run", "--with-tmux"])
         .assert()
-        .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("You passed --with-tmux").not());
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("You passed --with-tmux").not())
+        .stderr(predicate::str::is_empty());
+
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-tmux/meta.edn")
+        .is_file());
 }
 
 #[test]
 fn run_no_with_tmux_does_not_trigger_tmux_preflight() {
+    let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
 
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-no-tmux")
         .env("PATH", path_dir.path())
         .env_remove("TMUX")
         .args(["run", "--no-with-tmux"])
         .assert()
+        .success()
+        .stdout(predicate::str::contains("Brainyard by-rs"))
+        .stdout(predicate::str::contains("preview"))
+        .stderr(predicate::str::contains("You passed --with-tmux").not())
+        .stderr(predicate::str::is_empty());
+
+    assert!(home
+        .path()
+        .join(".brainyard/sessions/agt-no-tmux/meta.edn")
+        .is_file());
+}
+
+#[test]
+fn run_bedrock_dry_run_one_turn_prepares_request_and_session_meta() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-dry")
+        .env("BY_NO_DOTENV", "1")
+        .env_remove("AWS_REGION")
+        .env_remove("AWS_DEFAULT_REGION")
+        .env_remove("AWS_PROFILE")
+        .env_remove("AWS_DEFAULT_PROFILE")
+        .args([
+            "run",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "--region",
+            "ap-northeast-2",
+            "--aws-profile",
+            "sandbox",
+            "--max-tokens",
+            "64",
+            "--no-prompt-cache",
+            "What",
+            "is",
+            "2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"bedrock\""))
+        .stdout(predicate::str::contains("\"operation\": \"Converse\""))
+        .stdout(predicate::str::contains("\"network\": false"))
+        .stdout(predicate::str::contains("\"session_id\": \"agt-run-dry\""))
+        .stdout(predicate::str::contains("\"region\": \"ap-northeast-2\""))
+        .stdout(predicate::str::contains("\"aws_profile\": \"sandbox\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"amazon.nova-lite-v1:0\"",
+        ))
+        .stdout(predicate::str::contains("\"maxTokens\": 64"))
+        .stdout(predicate::str::contains("\"text\": \"What is 2+2?\""))
+        .stdout(predicate::str::contains("cachePoint").not())
+        .stderr(predicate::str::is_empty());
+
+    let meta = read_session_meta(home.path(), "agt-run-dry");
+    assert!(meta.contains(":agent-id :coact-agent"));
+    assert!(!home
+        .path()
+        .join(".brainyard/sessions/agt-run-dry/messages.log")
+        .exists());
+}
+
+#[test]
+fn run_bedrock_fixture_one_turn_persists_restore_compatible_messages() {
+    let home = tempfile::tempdir().unwrap();
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bedrock/converse-response.json");
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-fixture")
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "run",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--fixture-response",
+        ])
+        .arg(fixture)
+        .arg("What is 2+2?")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello world"))
+        .stderr(predicate::str::is_empty());
+
+    let messages = read_session_messages(home.path(), "agt-run-fixture");
+    let lines = messages.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains(r#":kind :message"#));
+    assert!(lines[0].contains(r#":role "user""#));
+    assert!(lines[0].contains(r#":content "What is 2+2?""#));
+    assert!(lines[1].contains(r#":kind :message"#));
+    assert!(lines[1].contains(r#":role "assistant""#));
+    assert!(lines[1].contains(r#":content "Hello world""#));
+}
+
+#[test]
+fn run_one_turn_mode_rejects_non_bedrock_before_network() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-openai")
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "run",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5",
+            "--live",
+            "What is 2+2?",
+        ])
+        .assert()
         .failure()
-        .code(1)
-        .stdout(predicate::str::is_empty())
-        .stderr(predicate::str::contains("by-rs run is not implemented yet"))
-        .stderr(predicate::str::contains("You passed --with-tmux").not());
+        .stderr(predicate::str::contains(
+            "by-rs run one-turn MVP currently supports provider 'bedrock' only",
+        ));
 }
 
 #[test]

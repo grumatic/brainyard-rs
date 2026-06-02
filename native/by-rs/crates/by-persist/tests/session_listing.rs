@@ -1,4 +1,8 @@
-use by_persist::{delete_session_dir, list_sessions, list_sessions_with_warnings};
+use by_contracts::parse_map;
+use by_persist::{
+    append_session_message, delete_session_dir, list_sessions, list_sessions_with_warnings,
+    save_session_meta, SessionMetaUpdate,
+};
 
 #[test]
 fn lists_session_dirs_with_optional_meta_edn() {
@@ -70,6 +74,122 @@ fn corrupt_meta_edn_keeps_session_visible_with_warning() {
 
     let sessions = list_sessions(root.path()).expect("legacy list should remain tolerant");
     assert_eq!(sessions[0].id, "broken");
+}
+
+#[test]
+fn save_session_meta_creates_session_dir_and_writes_clojure_keys() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let meta_path = save_session_meta(
+        root.path(),
+        "agt-test",
+        &SessionMetaUpdate {
+            user_id: Some("alice".to_string()),
+            agent_id: Some("coact-agent".to_string()),
+            defagent_id: Some("coact-agent".to_string()),
+            started_at_millis: Some(1780290000000),
+            last_attached_at_millis: Some(1780290100000),
+            working_dir: Some("/work/brainyard".to_string()),
+            ..SessionMetaUpdate::default()
+        },
+    )
+    .expect("meta write should succeed");
+
+    assert!(meta_path.ends_with("meta.edn"));
+    let raw = std::fs::read_to_string(&meta_path).unwrap();
+    assert!(raw.contains(r#":user-id "alice""#));
+    assert!(raw.contains(":agent-id :coact-agent"));
+    assert!(raw.contains(":defagent-id :coact-agent"));
+    assert!(raw.contains(":started-at 1780290000000"));
+    assert!(raw.contains(":last-attached-at 1780290100000"));
+    assert!(raw.contains(r#":working-dir "/work/brainyard""#));
+
+    let sessions = list_sessions(root.path()).expect("session list should load");
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, "agt-test");
+    assert_eq!(sessions[0].agent.as_deref(), Some("coact-agent"));
+    assert_eq!(sessions[0].started_at_millis, Some(1780290000000));
+    assert_eq!(sessions[0].last_attached_at_millis, Some(1780290100000));
+}
+
+#[test]
+fn save_session_meta_merges_resume_attach_without_losing_started_at() {
+    let root = tempfile::tempdir().expect("temp root");
+    let session_dir = root.path().join("alpha");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(
+        session_dir.join("meta.edn"),
+        r#"{:label "Alpha"
+            :defagent-id :coact-agent
+            :started-at 1000
+            :last-attached-at 2000
+            :nested {:kept true}}"#,
+    )
+    .unwrap();
+
+    save_session_meta(
+        root.path(),
+        "alpha",
+        &SessionMetaUpdate {
+            last_attached_at_millis: Some(3000),
+            ..SessionMetaUpdate::default()
+        },
+    )
+    .expect("resume attach update should succeed");
+
+    let raw = std::fs::read_to_string(session_dir.join("meta.edn")).unwrap();
+    let meta = parse_map(&raw).expect("updated meta should remain parseable");
+    assert_eq!(meta.string("label"), Some("Alpha"));
+    assert_eq!(meta.i64("started-at"), Some(1000));
+    assert_eq!(meta.i64("last-attached-at"), Some(3000));
+    assert!(raw.contains(":nested {:kept true}"));
+}
+
+#[test]
+fn save_session_meta_rejects_path_traversal() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let err = save_session_meta(root.path(), "../outside", &SessionMetaUpdate::default())
+        .expect_err("invalid id should fail");
+
+    assert!(err.to_string().contains("invalid session id"));
+}
+
+#[test]
+fn append_session_message_writes_restore_compatible_edn_lines() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let log_path = append_session_message(root.path(), "agt-test", "user", "hello \"brainyard\"")
+        .expect("user append should succeed");
+    append_session_message(root.path(), "agt-test", "assistant", "hi\nthere")
+        .expect("assistant append should succeed");
+
+    assert!(log_path.ends_with("messages.log"));
+    let raw = std::fs::read_to_string(&log_path).unwrap();
+    let lines = raw.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    for line in &lines {
+        let event = parse_map(line).expect("message event should be parseable EDN");
+        assert!(event.i64("t").is_some());
+        assert_eq!(
+            event.get("kind"),
+            Some(&by_contracts::EdnValue::Keyword("message".to_string()))
+        );
+    }
+    assert!(raw.contains(r#":role "user""#));
+    assert!(raw.contains(r#":content "hello \"brainyard\"""#));
+    assert!(raw.contains(r#":role "assistant""#));
+    assert!(raw.contains(r#":content "hi\nthere""#));
+}
+
+#[test]
+fn append_session_message_rejects_path_traversal() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let err = append_session_message(root.path(), "../outside", "user", "hello")
+        .expect_err("invalid id should fail");
+
+    assert!(err.to_string().contains("invalid session id"));
 }
 
 #[test]

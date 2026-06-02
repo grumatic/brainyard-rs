@@ -5,9 +5,13 @@ use clap::{ArgAction, Parser, Subcommand};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const RESUME_LATEST_SENTINEL: &str = "--by-resume-latest--";
+const RUN_PREVIEW_ROWS: usize = 24;
+const RUN_PREVIEW_COLS: usize = 80;
+static SESSION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 const TMUX_NEED_SESSION_GUIDANCE: &str =
     "You passed --with-tmux, but you're not currently inside a tmux session.
 For tmux side panes (activity, log) and popup dialogs, start a tmux
@@ -89,6 +93,27 @@ enum Commands {
         /// Max agent iterations.
         #[arg(long, short = 'n', value_name = "N")]
         max_iterations: Option<usize>,
+        /// AWS region for Bedrock one-turn MVP.
+        #[arg(long, value_name = "REGION", hide = true)]
+        region: Option<String>,
+        /// AWS profile for Bedrock one-turn MVP.
+        #[arg(long = "aws-profile", value_name = "PROFILE", hide = true)]
+        aws_profile: Option<String>,
+        /// Bedrock maxTokens value for one-turn MVP.
+        #[arg(long = "max-tokens", value_name = "N", hide = true)]
+        bedrock_max_tokens: Option<u32>,
+        /// Disable Bedrock prompt-cache cachePoint shaping for one-turn MVP.
+        #[arg(long = "no-prompt-cache", hide = true)]
+        no_prompt_cache: bool,
+        /// Print the Bedrock one-turn request JSON without network access.
+        #[arg(long = "dry-run", hide = true)]
+        dry_run: bool,
+        /// Call Bedrock Converse over the network for one-turn MVP.
+        #[arg(long = "live", hide = true)]
+        live: bool,
+        /// Replay a Bedrock Converse response fixture without network access.
+        #[arg(long = "fixture-response", value_name = "PATH", hide = true)]
+        fixture_response: Option<PathBuf>,
         /// Resume a persisted session; bare --resume means latest.
         #[arg(
             long,
@@ -523,28 +548,62 @@ fn run() -> Result<()> {
     let cli = Cli::parse_from(normalize_default_run_args(raw_args));
     match cli.command {
         Commands::Run {
-            agent: _agent,
-            provider: _provider,
-            model: _model,
-            user_id: _user_id,
+            agent,
+            provider,
+            model,
+            user_id,
             inline: _inline,
             no_inline: _no_inline,
             verbose: _verbose,
             no_verbose: _no_verbose,
             with_tmux,
-            no_with_tmux: _no_with_tmux,
-            max_iterations: _max_iterations,
+            no_with_tmux,
+            max_iterations,
+            region,
+            aws_profile,
+            bedrock_max_tokens,
+            no_prompt_cache,
+            dry_run,
+            live,
+            fixture_response,
             resume,
             select_resume,
-            no_select_resume: _no_select_resume,
+            no_select_resume,
             new: _new,
             no_new: _no_new,
-            positional: _positional,
+            positional,
         } => {
-            let _session_selection =
-                preflight_run_session_selection(select_resume, resume.as_deref())?;
-            preflight_run_tmux(with_tmux);
-            bail!("by-rs run is not implemented yet; use 'by-rs tui snapshot' for a static preview")
+            let one_turn_requested =
+                run_one_turn_mode_requested(dry_run, live, fixture_response.as_ref());
+            if one_turn_requested {
+                validate_run_one_turn_modes(dry_run, live, fixture_response.as_ref())?;
+            }
+            let session_selection = preflight_run_session_selection(
+                select_resume && !no_select_resume,
+                resume.as_deref(),
+            )?;
+            preflight_run_tmux(with_tmux && !no_with_tmux);
+            let session_selection =
+                prepare_run_session(session_selection, &agent, user_id.as_deref())?;
+            if one_turn_requested {
+                return print_run_bedrock_one_turn(RunBedrockOneTurnRequest {
+                    agent,
+                    provider,
+                    model,
+                    max_iterations,
+                    user_id,
+                    region,
+                    aws_profile,
+                    max_tokens: bedrock_max_tokens,
+                    no_prompt_cache,
+                    dry_run,
+                    live,
+                    fixture_response,
+                    question: positional,
+                    session_selection,
+                });
+            }
+            print_run_preview(agent, provider, model.as_deref(), &session_selection)
         }
         Commands::Ask {
             agent,
@@ -1064,6 +1123,192 @@ struct AskRequest {
     live: bool,
     fixture_response: Option<PathBuf>,
     question: Vec<String>,
+}
+
+#[derive(Debug)]
+struct RunBedrockOneTurnRequest {
+    agent: String,
+    provider: String,
+    model: Option<String>,
+    max_iterations: Option<usize>,
+    user_id: Option<String>,
+    region: Option<String>,
+    aws_profile: Option<String>,
+    max_tokens: Option<u32>,
+    no_prompt_cache: bool,
+    dry_run: bool,
+    live: bool,
+    fixture_response: Option<PathBuf>,
+    question: Vec<String>,
+    session_selection: RunSessionSelection,
+}
+
+fn run_one_turn_mode_requested(
+    dry_run: bool,
+    live: bool,
+    fixture_response: Option<&PathBuf>,
+) -> bool {
+    dry_run || live || fixture_response.is_some()
+}
+
+fn print_run_bedrock_one_turn(args: RunBedrockOneTurnRequest) -> Result<()> {
+    validate_run_one_turn_modes(args.dry_run, args.live, args.fixture_response.as_ref())?;
+    let (provider, model, question) =
+        resolve_run_one_turn_positionals(args.provider, args.model, args.question);
+    let question = question.context(
+        "by-rs run Bedrock MVP requires a prompt when --dry-run, --live, or --fixture-response is used",
+    )?;
+
+    let default_config = read_default_config()?;
+    let llm_config = default_config.as_ref().map(by_config::ConfigDocument::llm);
+    let agent_config = default_config
+        .as_ref()
+        .map(by_config::ConfigDocument::agent);
+    let resolved_agent = resolve_ask_agent(
+        args.agent,
+        agent_config
+            .as_ref()
+            .and_then(|config| config.default_agent.as_deref()),
+    );
+    let resolved_max_iterations = resolve_ask_max_iterations(&resolved_agent, args.max_iterations)?;
+    let resolved_provider = match provider.as_str() {
+        "claude-code" => llm_config
+            .as_ref()
+            .and_then(|config| config.default_provider.clone())
+            .unwrap_or(provider),
+        _ => provider,
+    };
+    let model = model
+        .or_else(|| {
+            llm_config
+                .as_ref()
+                .and_then(|config| config.default_model.clone())
+        })
+        .context("--model is required for run Bedrock MVP")?;
+
+    if resolved_provider != "bedrock" {
+        bail!("by-rs run one-turn MVP currently supports provider 'bedrock' only");
+    }
+
+    let session_id = args
+        .session_selection
+        .session_id
+        .as_deref()
+        .context("run session was not prepared")?
+        .to_string();
+    let messages = vec![by_llm::ChatMessage::user(question.clone())];
+    let dotenv = by_config::load_process_dotenv()?;
+    let catalog_region = bedrock_catalog_region(&model)?;
+    let runtime = by_llm::resolve_bedrock_runtime_options(by_llm::BedrockRuntimeInputs {
+        explicit_region: args.region,
+        catalog_region,
+        aws_region: by_config::process_env_or_dotenv(&dotenv, "AWS_REGION"),
+        aws_default_region: by_config::process_env_or_dotenv(&dotenv, "AWS_DEFAULT_REGION"),
+        explicit_profile: args.aws_profile,
+        aws_profile: by_config::process_env_or_dotenv(&dotenv, "AWS_PROFILE"),
+        aws_default_profile: by_config::process_env_or_dotenv(&dotenv, "AWS_DEFAULT_PROFILE"),
+    });
+
+    let config = by_llm::BedrockConfig {
+        model: model.clone(),
+        temperature: Some(0.0),
+        max_tokens: args.max_tokens,
+        prompt_cache: !args.no_prompt_cache && by_llm::bedrock_supports_prompt_cache(&model),
+        drop_temperature: by_llm::bedrock_drops_temperature(&model),
+    };
+
+    if let Some(path) = args.fixture_response {
+        let raw: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read response fixture {}", path.display()))?,
+        )
+        .with_context(|| format!("failed to parse response fixture {}", path.display()))?;
+        let projected = by_llm::reshape_provider_response("bedrock", raw)?;
+        let text = by_llm::projected_response_text(&projected);
+        let assistant_content = if text.is_empty() {
+            serde_json::to_string_pretty(&projected)?
+        } else {
+            text
+        };
+        persist_run_bedrock_exchange(&session_id, &question, &assistant_content)?;
+        println!("{assistant_content}");
+        return Ok(());
+    }
+
+    if args.dry_run {
+        let request = by_llm::build_bedrock_request(&config, &messages);
+        let user_id =
+            by_config::resolve_process_user_id_with_dotenv(args.user_id.as_deref(), &dotenv);
+        let dry_run = serde_json::json!({
+            "provider": "bedrock",
+            "operation": "Converse",
+            "network": false,
+            "session_id": session_id,
+            "resume": args.session_selection.resume,
+            "agent_session": ask_agent_session(&resolved_agent, user_id, resolved_max_iterations),
+            "region": runtime.region,
+            "aws_profile": runtime.aws_profile,
+            "request": request,
+        });
+        println!("{}", serde_json::to_string_pretty(&dry_run)?);
+        return Ok(());
+    }
+
+    let response = tokio::runtime::Runtime::new()
+        .context("failed to create Tokio runtime for Bedrock live call")?
+        .block_on(by_llm::converse_bedrock(by_llm::BedrockConverseRequest {
+            config,
+            runtime,
+            messages,
+            cache_zones: Vec::new(),
+        }))?;
+    let assistant_content = if response.text.is_empty() {
+        serde_json::to_string_pretty(&response.projected)?
+    } else {
+        response.text
+    };
+    persist_run_bedrock_exchange(&session_id, &question, &assistant_content)?;
+    println!("{assistant_content}");
+    Ok(())
+}
+
+fn validate_run_one_turn_modes(
+    dry_run: bool,
+    live: bool,
+    fixture_response: Option<&PathBuf>,
+) -> Result<()> {
+    if dry_run && live {
+        bail!("choose only one of --dry-run or --live");
+    }
+    if fixture_response.is_some() && (dry_run || live) {
+        bail!("choose only one of --dry-run, --live, or --fixture-response");
+    }
+    if !dry_run && !live && fixture_response.is_none() {
+        bail!("by-rs run Bedrock MVP requires --dry-run or --live");
+    }
+    Ok(())
+}
+
+fn resolve_run_one_turn_positionals(
+    provider: String,
+    model: Option<String>,
+    mut positionals: Vec<String>,
+) -> (String, Option<String>, Option<String>) {
+    let (provider, model) = match take_legacy_provider_model(&mut positionals) {
+        Some((legacy_provider, legacy_model)) => (legacy_provider, Some(legacy_model)),
+        None => (provider, model),
+    };
+    let joined = positionals.join(" ");
+    let trimmed = joined.trim();
+    let question = (!trimmed.is_empty()).then(|| trimmed.to_string());
+    (provider, model, question)
+}
+
+fn persist_run_bedrock_exchange(session_id: &str, question: &str, answer: &str) -> Result<()> {
+    let root = default_sessions_root().context("could not determine default session root")?;
+    by_persist::append_session_message(&root, session_id, "user", question)?;
+    by_persist::append_session_message(&root, session_id, "assistant", answer)?;
+    Ok(())
 }
 
 fn print_ask(args: AskRequest) -> Result<()> {
@@ -2467,6 +2712,62 @@ fn select_latest_resume_session(sessions: &[by_persist::SessionSummary]) -> RunS
     run_selection_from_pick(sessions.first().map(|session| session.id.clone()))
 }
 
+fn prepare_run_session(
+    selection: RunSessionSelection,
+    agent: &str,
+    user_id: Option<&str>,
+) -> Result<RunSessionSelection> {
+    let root = default_sessions_root().context("could not determine default session root")?;
+    let now_millis = current_epoch_millis().context("could not determine current time")?;
+    let session_id = selection
+        .session_id
+        .clone()
+        .unwrap_or_else(|| new_run_session_id(now_millis));
+
+    let update = if selection.resume {
+        by_persist::SessionMetaUpdate {
+            last_attached_at_millis: Some(now_millis),
+            ..by_persist::SessionMetaUpdate::default()
+        }
+    } else {
+        let dotenv = by_config::load_process_dotenv().unwrap_or_default();
+        let user_id = by_config::resolve_process_user_id_with_dotenv(user_id, &dotenv);
+        by_persist::SessionMetaUpdate {
+            user_id: Some(user_id),
+            agent_id: Some(agent.to_string()),
+            defagent_id: Some(agent.to_string()),
+            started_at_millis: Some(now_millis),
+            last_attached_at_millis: Some(now_millis),
+            working_dir: Some(std::env::current_dir()?.display().to_string()),
+            ..by_persist::SessionMetaUpdate::default()
+        }
+    };
+    by_persist::save_session_meta(root, &session_id, &update)?;
+
+    Ok(RunSessionSelection {
+        session_id: Some(session_id),
+        resume: selection.resume,
+    })
+}
+
+fn new_run_session_id(now_millis: i64) -> String {
+    if let Some(session_id) = std::env::var("BRAINYARD_SESSION_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return session_id;
+    }
+
+    let suffix_seed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| u64::from(duration.subsec_nanos()))
+        .unwrap_or(0);
+    let counter = SESSION_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let suffix = (suffix_seed ^ u64::from(std::process::id()) ^ counter) % 10_000;
+    format!("agt-{now_millis}-{suffix}")
+}
+
 fn sorted_sessions_by_activity(root: &Path) -> Result<Vec<by_persist::SessionSummary>> {
     let mut sessions = by_persist::list_sessions(root)?;
     sessions.sort_by(|left, right| {
@@ -2806,6 +3107,39 @@ fn format_age_millis(epoch_millis: i64) -> Option<String> {
 fn current_epoch_millis() -> Option<i64> {
     let duration = SystemTime::now().duration_since(UNIX_EPOCH).ok()?;
     i64::try_from(duration.as_millis()).ok()
+}
+
+fn print_run_preview(
+    agent: String,
+    provider: String,
+    model: Option<&str>,
+    selection: &RunSessionSelection,
+) -> Result<()> {
+    let frame = by_tui::StaticFrame {
+        rows: RUN_PREVIEW_ROWS,
+        cols: RUN_PREVIEW_COLS,
+        agent,
+        model: run_preview_model_label(&provider, model),
+        status: run_preview_status(selection),
+    };
+    println!("{}", by_tui::render_static_frame(&frame));
+    Ok(())
+}
+
+fn run_preview_model_label(provider: &str, model: Option<&str>) -> String {
+    match model {
+        Some(model) => format!("{provider}:{model}"),
+        None => provider.to_string(),
+    }
+}
+
+fn run_preview_status(selection: &RunSessionSelection) -> String {
+    if selection.resume {
+        let session_id = selection.session_id.as_deref().unwrap_or("latest");
+        format!("resume {session_id}")
+    } else {
+        "preview".to_string()
+    }
 }
 
 fn print_tui_snapshot(agent: String, model: String, rows: usize, cols: usize) -> Result<()> {
