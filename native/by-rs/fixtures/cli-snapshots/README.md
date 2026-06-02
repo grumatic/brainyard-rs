@@ -8,15 +8,13 @@ native/by-rs/scripts/capture-clojure-cli-snapshots.sh \
   --bin projects/agent-tui-app/target/by
 ```
 
-If the native/JVM `by` binary has not been built, capture through the Clojure
-Babashka task instead:
+If the native/JVM `by` binary has not been built, the script automatically
+falls back to the project-local Clojure CLI runner. You can still capture
+through the Babashka task explicitly:
 
 ```bash
 native/by-rs/scripts/capture-clojure-cli-snapshots.sh --runner "bb tui"
 ```
-
-When no binary is found and `bb` is available, the script automatically falls
-back to the `bb tui` runner.
 
 The capture script uses an isolated temporary `HOME` by default so read-only
 snapshots do not touch the developer's real `~/.brainyard` state.
@@ -26,7 +24,6 @@ the Clojure and Rust outputs:
 
 ```bash
 native/by-rs/scripts/capture-clojure-cli-snapshots.sh \
-  --runner "bb tui" \
   --out native/by-rs/target/cli-snapshots/clojure \
   --home native/by-rs/target/cli-home/clojure
 

@@ -16,10 +16,14 @@ Captures read-only Clojure `by` CLI stdout/stderr/exit-code snapshots for the
 Rust native port parity harness. The script uses a temporary HOME unless --home
 is provided, avoiding accidental writes to the developer's real ~/.brainyard.
 
-When a native/JVM `by` binary has not been built yet, use --runner "bb tui" to
-capture snapshots through the existing Babashka task. If no binary is found and
-Babashka is available, this script falls back to that runner automatically.
+When a native/JVM `by` binary has not been built yet, the script falls back to
+the project-local Clojure CLI runner automatically. You can still pass a custom
+--runner command such as "bb tui" when needed.
 USAGE
+}
+
+abs_path() {
+  python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$1"
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -61,6 +65,11 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+out_dir="$(abs_path "$out_dir")"
+if [[ -n "$fixture_home" ]]; then
+  fixture_home="$(abs_path "$fixture_home")"
+fi
+
 if [[ -n "$bin_path" && -n "$runner_command" ]]; then
   echo "--bin and --runner are mutually exclusive" >&2
   exit 2
@@ -71,12 +80,14 @@ if [[ -z "$bin_path" ]]; then
     :
   elif [[ -x "$repo_root/projects/agent-tui-app/target/by" ]]; then
     bin_path="$repo_root/projects/agent-tui-app/target/by"
+  elif command -v clojure >/dev/null 2>&1; then
+    runner_command="set -a && [ -f .env ] && source .env || true; cd projects/agent-tui-app && exec clojure -J--enable-native-access=ALL-UNNAMED -M -m ai.brainyard.agent-tui-app.main"
   elif command -v by >/dev/null 2>&1; then
     bin_path="$(command -v by)"
   elif [[ -f "$repo_root/bb.edn" ]] && command -v bb >/dev/null 2>&1; then
     runner_command="bb tui"
   else
-    echo "Could not find Clojure by binary. Pass --bin PATH, --runner COMMAND, or set BY_CLOJURE_BIN/BY_CLOJURE_RUNNER." >&2
+    echo "Could not find Clojure by binary or runner. Pass --bin PATH, --runner COMMAND, or set BY_CLOJURE_BIN/BY_CLOJURE_RUNNER." >&2
     exit 2
   fi
 fi

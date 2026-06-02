@@ -24,6 +24,10 @@ When `target/debug/by-rs` has not been built yet, the script falls back to
 USAGE
 }
 
+abs_path() {
+  python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$1"
+}
+
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
     --bin)
@@ -62,6 +66,11 @@ while [[ "$#" -gt 0 ]]; do
       ;;
   esac
 done
+
+out_dir="$(abs_path "$out_dir")"
+if [[ -n "$fixture_home" ]]; then
+  fixture_home="$(abs_path "$fixture_home")"
+fi
 
 if [[ -n "$bin_path" && -n "$runner_command" ]]; then
   echo "--bin and --runner are mutually exclusive" >&2
