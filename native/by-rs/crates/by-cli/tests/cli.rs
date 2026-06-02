@@ -2168,6 +2168,31 @@ fn ask_dry_run_exposes_agent_registry_max_iterations_default() {
 }
 
 #[test]
+fn ask_dry_run_exposes_config_schema_max_iterations_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("HOME", dir.path())
+        .env_remove("BRAINYARD_PROJECT_DIR")
+        .args([
+            "ask",
+            "-p",
+            "bedrock",
+            "-m",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"agent_id\": \"coact-agent\""))
+        .stdout(predicate::str::contains("\"max_iterations\": 100"))
+        .stdout(predicate::str::contains("\"max_iterations\": 30").not());
+}
+
+#[test]
 fn ask_dry_run_exposes_explicit_max_iterations_override() {
     Command::cargo_bin("by-rs")
         .unwrap()

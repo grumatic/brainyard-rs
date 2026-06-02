@@ -37,6 +37,7 @@ pub struct PermissionsConfig {
 }
 
 pub const USER_ID_FALLBACK: &str = "by-user";
+pub const DEFAULT_AGENT_MAX_ITERATIONS: usize = 100;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct UserIdInputs<'a> {

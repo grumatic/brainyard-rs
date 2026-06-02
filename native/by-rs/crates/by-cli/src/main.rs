@@ -1185,7 +1185,8 @@ fn resolve_ask_max_iterations(
         .agents
         .into_iter()
         .find(|agent| agent.id == agent_id)
-        .and_then(|agent| agent.max_iterations))
+        .and_then(|agent| agent.max_iterations)
+        .or(Some(by_config::DEFAULT_AGENT_MAX_ITERATIONS)))
 }
 
 fn resolve_ask_agent(cli_agent: String, config_default_agent: Option<&str>) -> String {
