@@ -34,7 +34,7 @@ enum Commands {
         #[arg(long, short = 'm', value_name = "MODEL")]
         model: Option<String>,
         /// User identity for sessions/memory.
-        #[arg(long = "user-id", short = 'u', value_name = "ID", hide = true)]
+        #[arg(long = "user-id", short = 'u', value_name = "ID")]
         user_id: Option<String>,
         /// Inline mode (no alt screen).
         #[arg(long, short = 'i', action = ArgAction::SetTrue)]
@@ -102,7 +102,7 @@ enum Commands {
         #[arg(long, short = 'n', value_name = "N")]
         max_iterations: Option<usize>,
         /// User identity for sessions/memory. Reserved for later full agent execution parity.
-        #[arg(long = "user-id", short = 'u', value_name = "ID", hide = true)]
+        #[arg(long = "user-id", short = 'u', value_name = "ID")]
         user_id: Option<String>,
         /// AWS region for Bedrock. Falls back to AWS_REGION, AWS_DEFAULT_REGION, then us-east-1.
         #[arg(long, value_name = "REGION")]
@@ -800,6 +800,7 @@ fn run_help() -> &'static str {
         "   -a, --agent S             coact-agent  Agent ID\n",
         "   -p, --provider S          claude-code  LM provider (claude-code, anthropic, openai, ollama)\n",
         "   -m, --model S                          Model name override\n",
+        "   -u, --user-id S                        User identity for sessions/memory (default: $BY_USER_ID, else OS login name)\n",
         "   -i, --[no-]inline                      Inline mode (no alt screen)\n",
         "   -v, --[no-]verbose                     Verbose output\n",
         "       --[no-]with-tmux                   Require tmux side panes / popups (exit 1 if not in a tmux session)\n",
@@ -823,6 +824,7 @@ fn ask_help() -> &'static str {
         "   -a, --agent S           coact-agent  Agent ID\n",
         "   -p, --provider S        claude-code  LM provider (claude-code, anthropic, openai, ollama)\n",
         "   -m, --model S                        Model name override\n",
+        "   -u, --user-id S                      User identity for sessions/memory (default: $BY_USER_ID, else OS login name)\n",
         "   -n, --max-iterations N               Max agent iterations\n",
         "   -?, --help\n",
     )

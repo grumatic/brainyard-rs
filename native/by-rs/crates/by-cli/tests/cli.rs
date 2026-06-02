@@ -48,6 +48,7 @@ fn run_help_matches_clojure_command_surface() {
         .stdout(predicate::str::contains(
             "NAME:\n by run - Start interactive TUI agent session (default)",
         ))
+        .stdout(predicate::str::contains("-u, --user-id S"))
         .stdout(predicate::str::contains("--[no-]inline"))
         .stdout(predicate::str::contains("--[no-]with-tmux"))
         .stdout(predicate::str::contains("--[no-]select-resume"));
@@ -2337,6 +2338,7 @@ fn ask_help_matches_clojure_command_surface() {
         ))
         .stdout(predicate::str::contains("coact-agent  Agent ID"))
         .stdout(predicate::str::contains("claude-code  LM provider"))
+        .stdout(predicate::str::contains("-u, --user-id S"))
         .stdout(predicate::str::contains("--dry-run").not())
         .stdout(predicate::str::contains("--live").not())
         .stdout(predicate::str::contains("--fixture-response").not());
