@@ -5,6 +5,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
 
+pub const ORACLE_REGISTRY_JSON: &str = include_str!("../../../fixtures/oracle/registry.json");
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RegistryFixture {
     pub tools: Vec<ToolDescriptor>,
@@ -51,6 +53,10 @@ pub fn load_registry_path(path: impl AsRef<Path>) -> Result<RegistryFixture> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read registry fixture {}", path.display()))?;
     load_registry_str(&raw)
+}
+
+pub fn load_embedded_oracle_registry() -> Result<RegistryFixture> {
+    load_registry_str(ORACLE_REGISTRY_JSON)
 }
 
 pub fn load_tools_path(path: impl AsRef<Path>) -> Result<Vec<ToolDescriptor>> {

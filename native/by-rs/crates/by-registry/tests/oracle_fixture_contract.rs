@@ -1,4 +1,4 @@
-use by_registry::{load_registry_path, load_tools_path};
+use by_registry::{load_embedded_oracle_registry, load_registry_path, load_tools_path};
 
 const ORACLE_REGISTRY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -42,6 +42,31 @@ fn clojure_oracle_registry_fixture_is_loadable() {
             .iter()
             .any(|tool| tool.id == "grep" && tool.tool_type == "tool"),
         "oracle fixture should include tool entries separately from agents"
+    );
+}
+
+#[test]
+fn embedded_clojure_oracle_registry_is_loadable() {
+    let registry =
+        load_embedded_oracle_registry().expect("embedded Clojure oracle registry should load");
+
+    assert!(
+        registry
+            .agents
+            .iter()
+            .any(|agent| agent.id == "coact-agent"),
+        "embedded registry should include the built-in coact-agent"
+    );
+    assert!(
+        registry
+            .models
+            .iter()
+            .any(|model| model.provider == "bedrock"),
+        "embedded registry should include Bedrock model metadata"
+    );
+    assert!(
+        registry.tools.iter().any(|tool| tool.id == "code$eval"),
+        "embedded registry should preserve tool metadata"
     );
 }
 

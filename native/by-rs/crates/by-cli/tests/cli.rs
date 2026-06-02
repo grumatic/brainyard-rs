@@ -79,6 +79,18 @@ fn agents_command_reads_registry_fixture() {
 }
 
 #[test]
+fn agents_command_uses_embedded_registry_by_default() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .arg("agents")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agent(s) available:"))
+        .stdout(predicate::str::contains("coact-agent"))
+        .stdout(predicate::str::contains("main-agent"));
+}
+
+#[test]
 fn models_help_matches_clojure_command_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
@@ -115,6 +127,20 @@ fn models_command_reads_registry_fixture() {
         .stdout(predicate::str::contains("bedrock"))
         .stdout(predicate::str::contains("amazon.nova-lite-v1:0"))
         .stdout(predicate::str::contains("1 model(s) listed."));
+}
+
+#[test]
+fn models_command_uses_embedded_registry_by_default() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .arg("models")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("PROVIDER"))
+        .stdout(predicate::str::contains("MODEL"))
+        .stdout(predicate::str::contains("bedrock"))
+        .stdout(predicate::str::contains("amazon.nova-lite-v1:0"))
+        .stdout(predicate::str::contains("model(s) listed."));
 }
 
 #[test]

@@ -63,17 +63,17 @@ enum Commands {
         #[arg(value_name = "QUESTION", num_args = 1..)]
         question: Vec<String>,
     },
-    /// List agents from a registry fixture.
+    /// List available agents.
     Agents {
         /// Path to an exported registry JSON fixture.
-        #[arg(long, value_name = "PATH")]
-        fixture: PathBuf,
+        #[arg(long, value_name = "PATH", hide = true)]
+        fixture: Option<PathBuf>,
     },
-    /// List models from a registry fixture.
+    /// List available LLM models.
     Models {
         /// Path to an exported registry JSON fixture.
-        #[arg(long, value_name = "PATH")]
-        fixture: PathBuf,
+        #[arg(long, value_name = "PATH", hide = true)]
+        fixture: Option<PathBuf>,
         /// Filter to a single provider, e.g. bedrock or openai.
         #[arg(long, value_name = "PROVIDER")]
         provider: Option<String>,
@@ -682,8 +682,8 @@ fn provider_or_model_rest_char(ch: char) -> bool {
     ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '.' | '_' | '-')
 }
 
-fn print_agents(fixture: PathBuf) -> Result<()> {
-    let registry = by_registry::load_registry_path(&fixture)?;
+fn print_agents(fixture: Option<PathBuf>) -> Result<()> {
+    let registry = load_registry_or_embedded(fixture)?;
     if registry.agents.is_empty() {
         println!("No agents registered.");
         return Ok(());
@@ -694,8 +694,8 @@ fn print_agents(fixture: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn print_models(fixture: PathBuf, provider: Option<String>) -> Result<()> {
-    let registry = by_registry::load_registry_path(&fixture)?;
+fn print_models(fixture: Option<PathBuf>, provider: Option<String>) -> Result<()> {
+    let registry = load_registry_or_embedded(fixture)?;
     if registry.models.is_empty() {
         println!("No models registered.");
         return Ok(());
@@ -715,6 +715,13 @@ fn print_models(fixture: PathBuf, provider: Option<String>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn load_registry_or_embedded(fixture: Option<PathBuf>) -> Result<by_registry::RegistryFixture> {
+    match fixture {
+        Some(path) => by_registry::load_registry_path(path),
+        None => by_registry::load_embedded_oracle_registry(),
+    }
 }
 
 fn print_tools(fixture: PathBuf, tool_type: Option<String>, id: Option<String>) -> Result<()> {
