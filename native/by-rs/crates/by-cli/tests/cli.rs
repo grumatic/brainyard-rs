@@ -1901,6 +1901,62 @@ fn config_bootstrap_projection_stays_read_only() {
 }
 
 #[test]
+fn config_bootstrap_projection_reports_clojure_permission_defaults_without_writing() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let nested = project.path().join("subdir");
+    std::fs::create_dir_all(project.path().join(".git")).unwrap();
+    std::fs::create_dir_all(&nested).unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(&nested)
+        .env("HOME", home.path())
+        .env_remove("BRAINYARD_PROJECT_DIR")
+        .args(["config", "--auto", "--profile", "dev", "--dry-run"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let expected_working_dir = std::fs::canonicalize(&nested).unwrap();
+    let expected_project_dir = std::fs::canonicalize(project.path()).unwrap();
+
+    assert_eq!(value["network"], false);
+    assert_eq!(value["writes"], false);
+    assert_eq!(
+        value["dirs"]["working_dir"],
+        expected_working_dir.display().to_string()
+    );
+    assert_eq!(
+        value["dirs"]["project_dir"],
+        expected_project_dir.display().to_string()
+    );
+    assert_eq!(value["dirs"]["user_dir"], home.path().display().to_string());
+    assert_eq!(
+        value["dirs"]["project_config_dir"],
+        expected_project_dir
+            .join(".brainyard")
+            .display()
+            .to_string()
+    );
+    assert_eq!(
+        value["dirs"]["user_config_dir"],
+        home.path().join(".brainyard").display().to_string()
+    );
+    assert_eq!(value["defaults"]["permissions"]["mode"], "ask-each-time");
+    assert_eq!(
+        value["defaults"]["permissions"]["allowed_dirs"],
+        serde_json::json!([
+            "/tmp",
+            expected_project_dir.display().to_string(),
+            home.path().join(".brainyard").display().to_string(),
+        ])
+    );
+    assert!(!project.path().join(".brainyard").exists());
+    assert!(!home.path().join(".brainyard").exists());
+}
+
+#[test]
 fn config_show_reads_llm_defaults_without_writing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.edn");

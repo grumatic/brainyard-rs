@@ -2188,6 +2188,9 @@ fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()>
     }
     validate_config_profile(opts.profile.as_deref());
 
+    let dirs = process_dirs();
+    let config_dirs = dirs.as_ref().map(config_dirs_projection);
+    let defaults = dirs.as_ref().map(config_defaults_projection);
     let projection = serde_json::json!({
         "operation": "config",
         "status": "not-implemented",
@@ -2199,10 +2202,42 @@ fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()>
         "re_bootstrap": opts.re_bootstrap && !opts.no_re_bootstrap,
         "dry_run": opts.dry_run && !opts.no_dry_run,
         "log": opts.log.map(|path| path.display().to_string()),
+        "dirs": config_dirs,
+        "defaults": defaults,
         "note": "by-rs keeps config bootstrap read-only until Clojure parity is proven; use `by-rs config show` for config inspection."
     });
     println!("{}", serde_json::to_string_pretty(&projection)?);
     Ok(())
+}
+
+fn config_dirs_projection(dirs: &by_config::BrainyardDirs) -> serde_json::Value {
+    serde_json::json!({
+        "working_dir": display_path(&dirs.working_dir),
+        "project_dir": display_path(&dirs.project_dir),
+        "user_dir": dirs.user_dir.as_ref().map(|path| display_path(path)),
+        "project_config_dir": display_path(&by_config::project_config_dir(dirs)),
+        "user_config_dir": by_config::user_config_dir(dirs)
+            .as_ref()
+            .map(|path| display_path(path)),
+    })
+}
+
+fn config_defaults_projection(dirs: &by_config::BrainyardDirs) -> serde_json::Value {
+    let allowed_dirs = by_config::default_allowed_dirs(dirs)
+        .into_iter()
+        .map(|path| display_path(&path))
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "permissions": {
+            "mode": "ask-each-time",
+            "allowed_dirs": allowed_dirs,
+        }
+    })
+}
+
+fn display_path(path: &std::path::Path) -> String {
+    path.display().to_string()
 }
 
 fn validate_config_profile(profile: Option<&str>) {
@@ -2419,12 +2454,19 @@ fn read_default_config() -> Result<Option<by_config::ConfigDocument>> {
         .with_context(|| format!("failed to read default config {}", path.display()))
 }
 
-fn default_config_path() -> Option<PathBuf> {
+fn process_dirs() -> Option<by_config::BrainyardDirs> {
     let working_dir = std::env::current_dir().ok()?;
     let user_dir = std::env::var_os("HOME").map(PathBuf::from);
     let project_dir_override = std::env::var_os("BRAINYARD_PROJECT_DIR").map(PathBuf::from);
-    let dirs = by_config::BrainyardDirs::resolve(working_dir, user_dir, project_dir_override);
-    by_config::resolve_default_config_path(&dirs)
+    Some(by_config::BrainyardDirs::resolve(
+        working_dir,
+        user_dir,
+        project_dir_override,
+    ))
+}
+
+fn default_config_path() -> Option<PathBuf> {
+    process_dirs().and_then(|dirs| by_config::resolve_default_config_path(&dirs))
 }
 
 fn default_sessions_root() -> Option<PathBuf> {
