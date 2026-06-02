@@ -941,6 +941,12 @@ struct AskRequest {
 }
 
 fn print_ask(args: AskRequest) -> Result<()> {
+    let (provider, model, question) =
+        resolve_ask_positionals(args.provider, args.model, args.question);
+    let Some(question) = question.filter(|question| !question.trim().is_empty()) else {
+        print_missing_ask_question_and_exit();
+    };
+
     if args.dry_run && args.live {
         bail!("choose only one of --dry-run or --live");
     }
@@ -950,9 +956,6 @@ fn print_ask(args: AskRequest) -> Result<()> {
     if !args.dry_run && !args.live && args.fixture_response.is_none() {
         bail!("by-rs ask requires --dry-run or --live");
     }
-
-    let (provider, model, question) =
-        resolve_ask_positionals(args.provider, args.model, args.question)?;
 
     let llm_config = read_default_llm_config()?;
     let resolved_provider = match provider.as_str() {
@@ -1070,20 +1073,23 @@ fn print_ask(args: AskRequest) -> Result<()> {
     Ok(())
 }
 
+fn print_missing_ask_question_and_exit() -> ! {
+    println!("Error: question argument is required.");
+    println!("Usage: by ask [options] QUESTION");
+    std::process::exit(1);
+}
+
 fn resolve_ask_positionals(
     provider: String,
     model: Option<String>,
     mut positionals: Vec<String>,
-) -> Result<(String, Option<String>, String)> {
+) -> (String, Option<String>, Option<String>) {
     let (provider, model) = match take_legacy_provider_model(&mut positionals) {
         Some((legacy_provider, legacy_model)) => (legacy_provider, Some(legacy_model)),
         None => (provider, model),
     };
-    let question = positionals
-        .into_iter()
-        .next()
-        .context("question argument is required")?;
-    Ok((provider, model, question))
+    let question = positionals.into_iter().next();
+    (provider, model, question)
 }
 
 fn take_legacy_provider_model(positionals: &mut Vec<String>) -> Option<(String, String)> {
