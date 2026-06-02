@@ -935,26 +935,28 @@
         (println (format "[dotenv] loaded %d key(s) from %s"
                          loaded-count
                          (str/join ", " (map :path paths)))))))
-  (let [first-arg (first args)
-        ;; Default to "run" when no subcommand given or when first arg is a flag
-        args (cond
-               ;; No args → run
-               (nil? first-arg)
-               (cons "run" args)
+  (let [first-arg (first args)]
+    (if (contains? version-flags first-arg)
+      (println (str "by " app-version))
+      (let [;; Default to "run" when no subcommand given or when first arg is a flag
+            args (cond
+                   ;; No args → run
+                   (nil? first-arg)
+                   (cons "run" args)
 
-               ;; Known subcommand → pass through
-               (contains? known-subcommands first-arg)
-               args
+                   ;; Known subcommand → pass through
+                   (contains? known-subcommands first-arg)
+                   args
 
-               ;; Help flags → pass through to cli-matic top-level
-               (contains? help-flags first-arg)
-               args
+                   ;; Help flags → pass through to cli-matic top-level
+                   (contains? help-flags first-arg)
+                   args
 
-               ;; Other flags (starts with -) → prepend run
-               (str/starts-with? first-arg "-")
-               (cons "run" args)
+                   ;; Other flags (starts with -) → prepend run
+                   (str/starts-with? first-arg "-")
+                   (cons "run" args)
 
-               ;; Bare agent-id (e.g. `bb tui coact-agent`) → run with positional
-               :else
-               (cons "run" args))]
-    (cli/run-cmd (inject-bare-resume-sentinel args) cli-config)))
+                   ;; Bare agent-id (e.g. `bb tui coact-agent`) → run with positional
+                   :else
+                   (cons "run" args))]
+        (cli/run-cmd (inject-bare-resume-sentinel args) cli-config)))))
