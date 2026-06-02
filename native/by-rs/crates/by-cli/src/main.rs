@@ -231,15 +231,21 @@ enum ConfigCommand {
 enum MemoryCommand {
     /// Print read-only SQLite memory schema and row-count metadata.
     Inspect {
-        /// Brainyard memory SQLite database path.
+        /// Brainyard memory SQLite database path. Defaults to ~/.brainyard/memory/<user-id>.db.
         #[arg(long, value_name = "PATH")]
-        db: PathBuf,
+        db: Option<PathBuf>,
+        /// User identity for default memory database path.
+        #[arg(long = "user-id", short = 'u', value_name = "ID")]
+        user_id: Option<String>,
     },
     /// Search L2 episodes and L3 semantic facts using compatible FTS5 tables.
     Search {
-        /// Brainyard memory SQLite database path.
+        /// Brainyard memory SQLite database path. Defaults to ~/.brainyard/memory/<user-id>.db.
         #[arg(long, value_name = "PATH")]
-        db: PathBuf,
+        db: Option<PathBuf>,
+        /// User identity for default memory database path.
+        #[arg(long = "user-id", short = 'u', value_name = "ID")]
+        user_id: Option<String>,
         /// Natural-language query. Multi-word queries default to OR recall.
         #[arg(long, value_name = "TEXT")]
         query: String,
@@ -571,8 +577,13 @@ fn run() -> Result<()> {
             }),
         },
         Commands::Memory { command } => match command {
-            MemoryCommand::Inspect { db } => print_memory_inspect(db),
-            MemoryCommand::Search { db, query, limit } => print_memory_search(db, query, limit),
+            MemoryCommand::Inspect { db, user_id } => print_memory_inspect(db, user_id),
+            MemoryCommand::Search {
+                db,
+                user_id,
+                query,
+                limit,
+            } => print_memory_search(db, user_id, query, limit),
         },
         Commands::Mcp { command } => match command {
             McpCommand::Servers { fixture } => print_mcp_servers(fixture),
@@ -2299,7 +2310,13 @@ fn print_config(path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn print_memory_search(db: PathBuf, query: String, limit: usize) -> Result<()> {
+fn print_memory_search(
+    db: Option<PathBuf>,
+    user_id: Option<String>,
+    query: String,
+    limit: usize,
+) -> Result<()> {
+    let db = resolve_memory_db_path(db, user_id)?;
     let request = by_memory::MemorySearchRequest { query, limit };
     for hit in by_memory::search_memory(&db, request)? {
         println!("{}\t{}\t{}", hit.layer.as_str(), hit.kind, hit.content);
@@ -2307,7 +2324,8 @@ fn print_memory_search(db: PathBuf, query: String, limit: usize) -> Result<()> {
     Ok(())
 }
 
-fn print_memory_inspect(db: PathBuf) -> Result<()> {
+fn print_memory_inspect(db: Option<PathBuf>, user_id: Option<String>) -> Result<()> {
+    let db = resolve_memory_db_path(db, user_id)?;
     let report = by_memory::inspect_memory(&db)?;
     println!("Memory database: {}", db.display());
     println!(
@@ -2331,6 +2349,20 @@ fn print_memory_inspect(db: PathBuf) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn resolve_memory_db_path(db: Option<PathBuf>, user_id: Option<String>) -> Result<PathBuf> {
+    if let Some(db) = db {
+        return Ok(db);
+    }
+
+    let dotenv = by_config::load_process_dotenv().unwrap_or_default();
+    let user_id = by_config::resolve_process_user_id_with_dotenv(user_id.as_deref(), &dotenv);
+    let dirs = process_dirs()
+        .context("could not determine default memory database path; pass --db or set HOME")?;
+
+    by_config::default_memory_db_path(&dirs, &user_id)
+        .context("could not determine default memory database path; pass --db or set HOME")
 }
 
 fn print_sessions(root: Option<PathBuf>) -> Result<()> {

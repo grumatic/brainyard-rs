@@ -2237,6 +2237,39 @@ fn memory_search_reads_sqlite_fts_without_writing() {
 }
 
 #[test]
+fn memory_search_uses_default_user_db_path_from_environment_without_project_writes() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join(".brainyard/memory/env-user.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let conn = Connection::open(&db_path).unwrap();
+    create_memory_schema(&conn);
+    conn.execute(
+        "INSERT INTO episodes (session_id, user_id, episode_type, role, content)
+         VALUES ('s1', 'env-user', 'conversation', 'assistant', 'blue default-path note')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BY_USER_ID", "env-user")
+        .env_remove("BY_ENV_FILE")
+        .env_remove("BY_NO_DOTENV")
+        .args(["memory", "search", "--query", "blue"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "l2\tconversation\tblue default-path note",
+        ));
+
+    assert!(!project.path().join(".brainyard").exists());
+}
+
+#[test]
 fn memory_inspect_reports_schema_and_counts_without_writing() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("memory.db");
@@ -2284,6 +2317,61 @@ fn memory_inspect_reports_schema_and_counts_without_writing() {
         .stdout(predicate::str::contains("semantic_facts"))
         .stdout(predicate::str::contains("semantic_fts"))
         .stdout(predicate::str::contains("memory_audit"));
+}
+
+#[test]
+fn memory_inspect_uses_user_id_flag_for_default_db_path() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let db_path = home.path().join(".brainyard/memory/alice.db");
+    std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+    let conn = Connection::open(&db_path).unwrap();
+    create_memory_schema(&conn);
+    conn.execute(
+        "INSERT OR REPLACE INTO memory_metadata (key, value)
+         VALUES ('schema_version', '2.0.0')",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BY_USER_ID", "env-user")
+        .env_remove("BY_ENV_FILE")
+        .env_remove("BY_NO_DOTENV")
+        .args(["memory", "inspect", "--user-id", "alice"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Memory database:"))
+        .stdout(predicate::str::contains("alice.db"))
+        .stdout(predicate::str::contains("schema-version: 2.0.0"))
+        .stdout(predicate::str::contains("env-user").not());
+}
+
+#[test]
+fn memory_default_db_missing_is_read_only_and_does_not_create_dirs() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BY_USER_ID", "missing-user")
+        .env_remove("BY_ENV_FILE")
+        .env_remove("BY_NO_DOTENV")
+        .args(["memory", "inspect"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "opening memory sqlite database read-only",
+        ));
+
+    assert!(!home.path().join(".brainyard").exists());
+    assert!(!project.path().join(".brainyard").exists());
 }
 
 #[test]

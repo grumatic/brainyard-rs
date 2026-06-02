@@ -1,7 +1,7 @@
 use by_config::{
-    default_allowed_dirs, load_dotenv_values, project_config_dir, read_config,
-    resolve_default_config_path, resolve_user_id, user_config_dir, AgentConfig, BrainyardDirs,
-    LlmConfig, PermissionsConfig, UserIdInputs,
+    default_allowed_dirs, default_memory_db_path, load_dotenv_values, project_config_dir,
+    read_config, resolve_default_config_path, resolve_user_id, user_config_dir, AgentConfig,
+    BrainyardDirs, LlmConfig, PermissionsConfig, UserIdInputs,
 };
 use std::fs;
 
@@ -255,6 +255,29 @@ fn default_allowed_dirs_drop_missing_user_dir_and_duplicates() {
         default_allowed_dirs(&dirs),
         vec![std::path::PathBuf::from("/tmp")]
     );
+}
+
+#[test]
+fn default_memory_db_path_matches_clojure_user_store_location() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let dirs = BrainyardDirs::resolve(project.path(), Some(home.path()), None::<&std::path::Path>);
+
+    assert_eq!(
+        default_memory_db_path(&dirs, "alice"),
+        Some(home.path().join(".brainyard/memory/alice.db"))
+    );
+}
+
+#[test]
+fn default_memory_db_path_requires_user_dir() {
+    let dirs = BrainyardDirs::resolve(
+        "/tmp/project",
+        None::<&std::path::Path>,
+        None::<&std::path::Path>,
+    );
+
+    assert_eq!(default_memory_db_path(&dirs, "alice"), None);
 }
 
 #[test]
