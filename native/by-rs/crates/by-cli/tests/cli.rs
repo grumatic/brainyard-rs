@@ -623,6 +623,38 @@ fn mcp_health_hidden_command_projects_ping_fixture_to_clojure_shape() {
 }
 
 #[test]
+fn mcp_health_hidden_command_projects_ping_error_fixture_to_unhealthy_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("ping-error-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":51,"error":{"code":-32000,"message":"ping failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "health",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "51", "--timestamp-ms", "1700000000001"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["name"], "filesystem");
+    assert_eq!(value["result"]["status"], "unhealthy");
+    assert_eq!(value["result"]["error"], "ping failed");
+    assert_eq!(value["result"]["timestamp"], 1_700_000_000_001_u64);
+}
+
+#[test]
 fn mcp_disconnected_hidden_command_projects_clojure_shape() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()

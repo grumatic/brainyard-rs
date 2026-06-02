@@ -1302,6 +1302,22 @@ fn print_mcp_health(
                 fixture_response.display()
             )
         })?;
+        if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+            .with_context(|| {
+                format!(
+                    "failed to project MCP ping response fixture {}",
+                    fixture_response.display()
+                )
+            })?
+        {
+            let output = by_mcp::project_server_unhealthy_command_result(
+                &server_name,
+                &error,
+                timestamp_ms,
+            )?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            return Ok(());
+        }
         extract_mcp_ping_fixture_result(&raw, request_id).with_context(|| {
             format!(
                 "failed to project MCP ping response fixture {}",

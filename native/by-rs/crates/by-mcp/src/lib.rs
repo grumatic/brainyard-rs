@@ -291,6 +291,33 @@ pub fn extract_jsonrpc_result_from_json(body_text: &str, request_id: u64) -> Res
     Ok(object.get("result").cloned())
 }
 
+pub fn extract_jsonrpc_error_message_from_json(
+    body_text: &str,
+    request_id: u64,
+) -> Result<Option<String>> {
+    let parsed: Value = serde_json::from_str(body_text).context("invalid JSON-RPC body")?;
+    let Some(object) = parsed.as_object() else {
+        bail!("JSON-RPC body must be an object");
+    };
+    let Some(id) = object.get("id") else {
+        return Ok(None);
+    };
+    if !jsonrpc_id_matches(id, request_id) {
+        bail!("unexpected JSON-RPC response id {id}; expected {request_id}");
+    }
+    let Some(error) = object.get("error") else {
+        return Ok(None);
+    };
+
+    Ok(Some(
+        error
+            .get("message")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| error.to_string()),
+    ))
+}
+
 pub fn tools_from_list_result(server_name: &str, result: &Value) -> Result<Vec<McpTool>> {
     ensure_nonblank(server_name, "server_name")?;
     let object = result
@@ -384,6 +411,23 @@ pub fn project_server_health_command_result(
     Ok(json!({
         "result": {
             "status": status,
+            "timestamp": timestamp_ms,
+            "name": server_name,
+        }
+    }))
+}
+
+pub fn project_server_unhealthy_command_result(
+    server_name: &str,
+    error: &str,
+    timestamp_ms: u64,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "result": {
+            "status": "unhealthy",
+            "error": error,
             "timestamp": timestamp_ms,
             "name": server_name,
         }
