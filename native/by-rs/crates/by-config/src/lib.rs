@@ -28,6 +28,16 @@ pub struct AgentConfig {
     pub default_agent: Option<String>,
 }
 
+pub const USER_ID_FALLBACK: &str = "by-user";
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct UserIdInputs<'a> {
+    pub explicit: Option<&'a str>,
+    pub by_user_id_env: Option<&'a str>,
+    pub by_user_id_property: Option<&'a str>,
+    pub os_user_name: Option<&'a str>,
+}
+
 impl ConfigDocument {
     pub fn empty() -> Self {
         Self {
@@ -99,6 +109,40 @@ pub fn resolve_default_config_path(dirs: &BrainyardDirs) -> Option<PathBuf> {
     dirs.user_dir
         .as_ref()
         .map(|user_dir| user_dir.join(".brainyard/config.edn"))
+}
+
+pub fn resolve_user_id(inputs: UserIdInputs<'_>) -> String {
+    first_non_blank([
+        inputs.explicit,
+        inputs.by_user_id_env,
+        inputs.by_user_id_property,
+        inputs.os_user_name,
+        Some(USER_ID_FALLBACK),
+    ])
+    .expect("USER_ID_FALLBACK is non-blank")
+}
+
+pub fn resolve_process_user_id(explicit: Option<&str>) -> String {
+    let by_user_id_env = std::env::var("BY_USER_ID").ok();
+    let os_user_name = std::env::var("USER")
+        .ok()
+        .or_else(|| std::env::var("USERNAME").ok());
+
+    resolve_user_id(UserIdInputs {
+        explicit,
+        by_user_id_env: by_user_id_env.as_deref(),
+        by_user_id_property: None,
+        os_user_name: os_user_name.as_deref(),
+    })
+}
+
+fn first_non_blank<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<String> {
+    values
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn find_git_root(start_dir: &Path) -> Option<PathBuf> {

@@ -700,6 +700,7 @@ fn memory_inspect_reports_schema_and_counts_without_writing() {
 fn ask_dry_run_accepts_user_id_flag_from_main_contract() {
     Command::cargo_bin("by-rs")
         .unwrap()
+        .env("BY_USER_ID", "env-user")
         .args([
             "ask",
             "--provider",
@@ -715,7 +716,30 @@ fn ask_dry_run_accepts_user_id_flag_from_main_contract() {
         .success()
         .stdout(predicate::str::contains(
             "\"modelId\": \"amazon.nova-lite-v1:0\"",
-        ));
+        ))
+        .stdout(predicate::str::contains("\"user_id\": \"alice\""))
+        .stdout(predicate::str::contains("env-user").not());
+}
+
+#[test]
+fn ask_dry_run_resolves_user_id_from_environment_when_flag_blank() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_USER_ID", "env-user")
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--user-id",
+            "   ",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"user_id\": \"env-user\""));
 }
 
 #[test]

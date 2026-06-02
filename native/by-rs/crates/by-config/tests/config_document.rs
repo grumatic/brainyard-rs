@@ -1,4 +1,7 @@
-use by_config::{read_config, resolve_default_config_path, AgentConfig, BrainyardDirs, LlmConfig};
+use by_config::{
+    read_config, resolve_default_config_path, resolve_user_id, AgentConfig, BrainyardDirs,
+    LlmConfig, UserIdInputs,
+};
 use std::fs;
 
 #[test]
@@ -112,4 +115,51 @@ fn default_config_path_honors_project_dir_override() {
     let dirs = BrainyardDirs::resolve(cwd.path(), Some(home.path()), Some(override_project.path()));
 
     assert_eq!(resolve_default_config_path(&dirs), Some(project_config));
+}
+
+#[test]
+fn user_id_resolution_matches_main_startup_precedence() {
+    let resolved = resolve_user_id(UserIdInputs {
+        explicit: Some(" cli-user "),
+        by_user_id_env: Some("env-user"),
+        by_user_id_property: Some("property-user"),
+        os_user_name: Some("os-user"),
+    });
+    assert_eq!(resolved, "cli-user");
+
+    let resolved = resolve_user_id(UserIdInputs {
+        explicit: Some("   "),
+        by_user_id_env: Some(" env-user "),
+        by_user_id_property: Some("property-user"),
+        os_user_name: Some("os-user"),
+    });
+    assert_eq!(resolved, "env-user");
+
+    let resolved = resolve_user_id(UserIdInputs {
+        explicit: None,
+        by_user_id_env: Some("   "),
+        by_user_id_property: Some(" property-user "),
+        os_user_name: Some("os-user"),
+    });
+    assert_eq!(resolved, "property-user");
+
+    let resolved = resolve_user_id(UserIdInputs {
+        explicit: None,
+        by_user_id_env: None,
+        by_user_id_property: Some("   "),
+        os_user_name: Some(" os-user "),
+    });
+    assert_eq!(resolved, "os-user");
+}
+
+#[test]
+fn user_id_resolution_falls_back_to_by_user() {
+    let resolved = resolve_user_id(UserIdInputs {
+        explicit: Some(""),
+        by_user_id_env: Some("   "),
+        by_user_id_property: None,
+        os_user_name: None,
+    });
+
+    assert_eq!(resolved, "by-user");
 }

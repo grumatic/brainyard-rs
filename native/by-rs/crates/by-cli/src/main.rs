@@ -328,7 +328,7 @@ fn run() -> Result<()> {
             provider,
             model,
             max_iterations: _max_iterations,
-            user_id: _user_id,
+            user_id,
             region,
             aws_profile,
             temperature,
@@ -341,6 +341,7 @@ fn run() -> Result<()> {
         } => print_ask(AskRequest {
             provider,
             model,
+            user_id,
             region,
             aws_profile,
             temperature,
@@ -663,6 +664,7 @@ fn sessions_prune_help() -> &'static str {
 struct AskRequest {
     provider: String,
     model: Option<String>,
+    user_id: Option<String>,
     region: Option<String>,
     aws_profile: Option<String>,
     temperature: f64,
@@ -728,10 +730,14 @@ fn print_ask(args: AskRequest) -> Result<()> {
 
     if args.dry_run {
         let request = by_llm::build_bedrock_request(&config, &messages);
+        let user_id = by_config::resolve_process_user_id(args.user_id.as_deref());
         let dry_run = serde_json::json!({
             "provider": "bedrock",
             "operation": "Converse",
             "network": false,
+            "agent_session": {
+                "user_id": user_id,
+            },
             "region": runtime.region,
             "aws_profile": runtime.aws_profile,
             "request": request,
