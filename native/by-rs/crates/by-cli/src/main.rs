@@ -1394,6 +1394,18 @@ fn print_mcp_tools(server_name: String, fixture_response: PathBuf, request_id: u
             fixture_response.display()
         )
     })?;
+    if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+        .with_context(|| {
+            format!(
+                "failed to project MCP tools/list response fixture {}",
+                fixture_response.display()
+            )
+        })?
+    {
+        let output = by_mcp::project_tools_list_error_command_result(&error)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
     let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
         format!(
             "failed to project MCP tools/list response fixture {}",

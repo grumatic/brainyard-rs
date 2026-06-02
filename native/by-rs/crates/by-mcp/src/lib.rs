@@ -355,6 +355,13 @@ pub fn project_tools_list_command_result(tools: &[McpTool]) -> Value {
     })
 }
 
+pub fn project_tools_list_error_command_result(error: &str) -> Result<Value> {
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to list MCP tools: {error}")
+    }))
+}
+
 pub fn project_server_resources_command_result(
     server_name: &str,
     resources: Value,

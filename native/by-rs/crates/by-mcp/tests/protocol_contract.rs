@@ -15,10 +15,10 @@ use by_mcp::{
     project_server_resources_command_result, project_server_resources_error_command_result,
     project_server_unhealthy_command_result, project_tool_call_errors_command_result,
     project_tool_call_validation_error_command_result, project_tool_calls_command_result,
-    project_tools_list_command_result, read_resource_request, registered_tool_id,
-    safe_clojure_symbol_name, stdio_initialize_request, tool_call_request_from_call,
-    tool_calls_from_value, tools_from_list_result, validate_server_config, CLIENT_NAME,
-    CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
+    project_tools_list_command_result, project_tools_list_error_command_result,
+    read_resource_request, registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
+    tool_call_request_from_call, tool_calls_from_value, tools_from_list_result,
+    validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
 use serde_json::json;
@@ -283,6 +283,11 @@ fn tools_list_projection_matches_clojure_cache_shape() {
             }
         })
     );
+    assert_eq!(
+        project_tools_list_error_command_result("tools failed").unwrap(),
+        json!({"error": "Failed to list MCP tools: tools failed"})
+    );
+    assert!(project_tools_list_error_command_result("").is_err());
 }
 
 #[test]

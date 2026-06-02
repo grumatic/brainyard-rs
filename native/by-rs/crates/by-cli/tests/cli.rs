@@ -853,6 +853,35 @@ fn mcp_tools_hidden_command_projects_clojure_list_shape() {
 }
 
 #[test]
+fn mcp_tools_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("tools-list-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":43,"error":{"code":-32000,"message":"tools failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "tools",
+            "--server-name",
+            "filesystem",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "43"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["error"], "Failed to list MCP tools: tools failed");
+}
+
+#[test]
 fn mcp_tools_hidden_command_accepts_raw_result_fixture() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("tools-list-result.json");
