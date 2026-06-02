@@ -308,6 +308,39 @@ enum McpCommand {
         #[arg(long = "request-id", default_value_t = 1)]
         request_id: u64,
     },
+    /// Project a resources/read request or response fixture.
+    ReadResource {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Resource URI to read.
+        #[arg(long = "resource-uri", value_name = "URI")]
+        resource_uri: String,
+        /// Optional resources/read JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: Option<PathBuf>,
+        /// JSON-RPC request id.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
+    /// Project a prompts/get request or response fixture.
+    GetPrompt {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Prompt name to fetch.
+        #[arg(long = "prompt-name", value_name = "PROMPT_NAME")]
+        prompt_name: String,
+        /// Prompt arguments as a JSON object.
+        #[arg(long = "arguments", default_value = "{}", value_name = "JSON")]
+        arguments: String,
+        /// Optional prompts/get JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: Option<PathBuf>,
+        /// JSON-RPC request id.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -483,6 +516,25 @@ fn run() -> Result<()> {
                 server_name,
                 tool_name,
                 tool_args,
+                fixture_response,
+                request_id,
+            ),
+            McpCommand::ReadResource {
+                server_name,
+                resource_uri,
+                fixture_response,
+                request_id,
+            } => print_mcp_read_resource(server_name, resource_uri, fixture_response, request_id),
+            McpCommand::GetPrompt {
+                server_name,
+                prompt_name,
+                arguments,
+                fixture_response,
+                request_id,
+            } => print_mcp_get_prompt(
+                server_name,
+                prompt_name,
+                arguments,
                 fixture_response,
                 request_id,
             ),
@@ -1174,19 +1226,101 @@ fn print_mcp_call_tool(
     Ok(())
 }
 
+fn print_mcp_read_resource(
+    server_name: String,
+    resource_uri: String,
+    fixture_response: Option<PathBuf>,
+    request_id: u64,
+) -> Result<()> {
+    if let Some(fixture_response) = fixture_response {
+        let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+            format!(
+                "failed to read MCP resources/read response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+            format!(
+                "failed to project MCP resources/read response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let output =
+            by_mcp::project_read_resource_command_result(&server_name, &resource_uri, result)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let output = by_mcp::read_resource_request(request_id, &resource_uri)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
+fn print_mcp_get_prompt(
+    server_name: String,
+    prompt_name: String,
+    arguments: String,
+    fixture_response: Option<PathBuf>,
+    request_id: u64,
+) -> Result<()> {
+    let prompt_arguments = parse_prompt_arguments(&arguments)?;
+
+    if let Some(fixture_response) = fixture_response {
+        let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+            format!(
+                "failed to read MCP prompts/get response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+            format!(
+                "failed to project MCP prompts/get response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let output = by_mcp::project_get_prompt_command_result(&server_name, &prompt_name, result)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let output = by_mcp::get_prompt_request(request_id, &prompt_name, prompt_arguments)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
+    Ok(())
+}
+
+fn parse_prompt_arguments(raw: &str) -> Result<serde_json::Value> {
+    if raw.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Ok(serde_json::json!({}));
+    };
+
+    if value.is_object() {
+        Ok(value)
+    } else {
+        bail!("--arguments JSON must be an object");
+    }
+}
+
 fn extract_mcp_fixture_result(raw: &str, request_id: u64) -> Result<serde_json::Value> {
     if let Some(result) = by_mcp::extract_jsonrpc_result_from_json(raw, request_id)? {
         return Ok(result);
     }
 
     let value: serde_json::Value =
-        serde_json::from_str(raw).context("invalid MCP tools/list fixture JSON")?;
-    if value.get("tools").is_some() {
+        serde_json::from_str(raw).context("invalid MCP response fixture JSON")?;
+    if value.get("tools").is_some()
+        || value.get("content").is_some()
+        || value.get("contents").is_some()
+        || value.get("messages").is_some()
+    {
         Ok(value)
     } else if let Some(result) = value.get("result") {
         Ok(result.clone())
     } else {
-        bail!("MCP tools/list fixture must contain a tools array or JSON-RPC result");
+        bail!("MCP fixture must contain a raw result object or JSON-RPC result");
     }
 }
 

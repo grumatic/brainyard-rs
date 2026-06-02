@@ -3,7 +3,8 @@ use by_mcp::{
     extract_jsonrpc_result_from_sse, get_prompt_request, http_initialize_request,
     initialized_notification, list_resources_request, list_tools_request, make_error_response,
     make_notification, make_request, make_response, mcp_input_schema_to_malli, normalize_tool_args,
-    parse_sse_events, project_registered_tool_descriptors, project_registered_tools_command_result,
+    parse_sse_events, project_get_prompt_command_result, project_read_resource_command_result,
+    project_registered_tool_descriptors, project_registered_tools_command_result,
     project_tool_calls_command_result, project_tools_list_command_result, read_resource_request,
     registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
     tool_call_request_from_call, tool_calls_from_value, tools_from_list_result,
@@ -445,6 +446,50 @@ fn mcp_tool_call_projection_matches_clojure_command_shape() {
             }
         })
     );
+}
+
+#[test]
+fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
+    assert_eq!(
+        project_read_resource_command_result(
+            "filesystem",
+            "file:///tmp/a.txt",
+            json!({"contents": [{"uri": "file:///tmp/a.txt", "text": "hello"}]})
+        )
+        .unwrap(),
+        json!({
+            "result": {
+                "name": "filesystem",
+                "uri": "file:///tmp/a.txt",
+                "resource": {
+                    "contents": [{"uri": "file:///tmp/a.txt", "text": "hello"}]
+                }
+            }
+        })
+    );
+
+    assert_eq!(
+        project_get_prompt_command_result(
+            "linear",
+            "summarize",
+            json!({"messages": [{"role": "user", "content": {"type": "text", "text": "hi"}}]})
+        )
+        .unwrap(),
+        json!({
+            "result": {
+                "name": "linear",
+                "prompt-name": "summarize",
+                "prompt": {
+                    "messages": [
+                        {"role": "user", "content": {"type": "text", "text": "hi"}}
+                    ]
+                }
+            }
+        })
+    );
+
+    assert!(project_read_resource_command_result("", "file:///tmp/a.txt", json!({})).is_err());
+    assert!(project_get_prompt_command_result("linear", "", json!({})).is_err());
 }
 
 #[test]

@@ -455,6 +455,38 @@ pub fn project_tool_calls_command_result(
     }))
 }
 
+pub fn project_read_resource_command_result(
+    server_name: &str,
+    resource_uri: &str,
+    resource: Value,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(resource_uri, "resource_uri")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "uri": resource_uri,
+            "resource": resource,
+        }
+    }))
+}
+
+pub fn project_get_prompt_command_result(
+    server_name: &str,
+    prompt_name: &str,
+    prompt: Value,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(prompt_name, "prompt_name")?;
+    Ok(json!({
+        "result": {
+            "name": server_name,
+            "prompt-name": prompt_name,
+            "prompt": prompt,
+        }
+    }))
+}
+
 pub fn registered_tool_id(server_name: &str, tool_name: &str) -> Result<String> {
     ensure_nonblank(server_name, "server_name")?;
     ensure_nonblank(tool_name, "tool_name")?;
