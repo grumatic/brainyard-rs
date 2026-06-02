@@ -403,6 +403,30 @@ fn models_command_filters_by_provider() {
 }
 
 #[test]
+fn models_command_accepts_short_provider_flag_like_clojure() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("registry.json");
+    std::fs::write(
+        &fixture,
+        r#"{"agents":[],"models":[{"provider":"bedrock","id":"amazon.nova-lite-v1:0"},{"provider":"openai","id":"gpt-5"}]}"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["models", "--fixture"])
+        .arg(&fixture)
+        .args(["-p", "bedrock"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("amazon.nova-lite-v1:0"))
+        .stdout(predicate::str::contains(
+            "1 model(s) listed. (filtered to bedrock)",
+        ))
+        .stdout(predicate::str::contains("gpt-5").not());
+}
+
+#[test]
 fn models_command_displays_region_when_present() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("registry.json");

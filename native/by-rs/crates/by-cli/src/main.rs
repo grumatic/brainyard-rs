@@ -144,7 +144,7 @@ enum Commands {
         #[arg(long, value_name = "PATH", hide = true)]
         fixture: Option<PathBuf>,
         /// Filter to a single provider, e.g. bedrock or openai.
-        #[arg(long, value_name = "PROVIDER")]
+        #[arg(long, short = 'p', value_name = "PROVIDER")]
         provider: Option<String>,
     },
     /// List tool and command descriptors from a registry fixture.
