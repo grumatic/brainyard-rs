@@ -1,5 +1,6 @@
 use by_registry::{
     load_embedded_oracle_registry, load_mcp_servers_path, load_registry_path, load_tools_path,
+    ToolDescriptor,
 };
 
 const ORACLE_REGISTRY: &str = concat!(
@@ -14,6 +15,40 @@ const ORACLE_MCP_SERVERS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/oracle/mcp-servers.json"
 );
+
+fn assert_user_tool_commands(tools: &[ToolDescriptor], context: &str) {
+    for id in ["tools$create", "tools$list", "tools$read", "tools$delete"] {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.id == id)
+            .unwrap_or_else(|| panic!("{context} should include {id}"));
+
+        assert_eq!(
+            tool.tool_type, "command",
+            "{context} should type {id} as command"
+        );
+        assert!(
+            tool.input_schema.is_array(),
+            "{context} should preserve {id} input schema"
+        );
+        assert!(
+            tool.output_schema.is_array(),
+            "{context} should preserve {id} output schema"
+        );
+    }
+
+    let create = tools
+        .iter()
+        .find(|tool| tool.id == "tools$create")
+        .expect("tools$create should be present after the command set check");
+    assert!(
+        create
+            .description
+            .as_deref()
+            .is_some_and(|description| description.contains("PERSISTENT tool")),
+        "{context} should preserve tools$create persistence semantics"
+    );
+}
 
 #[test]
 fn clojure_oracle_registry_fixture_is_loadable() {
@@ -49,6 +84,7 @@ fn clojure_oracle_registry_fixture_is_loadable() {
         registry.tools.iter().any(|tool| tool.id == "code$eval"),
         "oracle fixture should include the code$eval command contract"
     );
+    assert_user_tool_commands(&registry.tools, "oracle registry fixture");
     assert!(
         registry
             .tools
@@ -118,6 +154,7 @@ fn embedded_clojure_oracle_registry_is_loadable() {
         registry.tools.iter().any(|tool| tool.id == "code$eval"),
         "embedded registry should preserve tool metadata"
     );
+    assert_user_tool_commands(&registry.tools, "embedded registry");
     assert!(
         registry
             .mcp_servers
@@ -137,6 +174,7 @@ fn standalone_clojure_oracle_tools_fixture_is_loadable() {
             && tool.input_schema.is_array()),
         "tools fixture should preserve command ids, types, and schemas"
     );
+    assert_user_tool_commands(&tools, "standalone tools fixture");
 }
 
 #[test]

@@ -896,6 +896,26 @@ fn tools_command_reads_standalone_tools_fixture_and_filters_by_id() {
 }
 
 #[test]
+fn tools_command_reads_refreshed_oracle_user_tool_commands() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/oracle/tools.json");
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["tools", "--fixture"])
+        .arg(&fixture)
+        .args(["--id", "tools$create"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tools$create"))
+        .stdout(predicate::str::contains("command"))
+        .stdout(predicate::str::contains("PERSISTENT tool"))
+        .stdout(predicate::str::contains(
+            "1 tool(s) listed. (filtered to id tools$create)",
+        ))
+        .stdout(predicate::str::contains("tools$list").not());
+}
+
+#[test]
 fn mcp_servers_hidden_command_projects_clojure_list_shape() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("registry.json");
