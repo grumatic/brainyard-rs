@@ -2145,7 +2145,14 @@ fn print_sessions(root: Option<PathBuf>) -> Result<()> {
         Some(root) => root,
         None => default_sessions_root().context("could not determine default session root")?,
     };
-    let sessions = by_persist::list_sessions(&root)?;
+    let report = by_persist::list_sessions_with_warnings(&root)?;
+    for warning in &report.warnings {
+        eprintln!(
+            "[persist] skipping unreadable meta.edn for {}: {}",
+            warning.session_id, warning.message
+        );
+    }
+    let sessions = report.sessions;
     if sessions.is_empty() {
         println!("No persisted sessions.");
         return Ok(());

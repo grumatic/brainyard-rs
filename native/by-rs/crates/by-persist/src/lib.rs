@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use by_contracts::{parse_map, EdnMap, EdnValue};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -18,10 +19,30 @@ pub struct SessionSummary {
     pub path: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionReadWarning {
+    pub session_id: String,
+    pub path: PathBuf,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionList {
+    pub sessions: Vec<SessionSummary>,
+    pub warnings: Vec<SessionReadWarning>,
+}
+
 pub fn list_sessions(root: impl AsRef<Path>) -> Result<Vec<SessionSummary>> {
+    Ok(list_sessions_with_warnings(root)?.sessions)
+}
+
+pub fn list_sessions_with_warnings(root: impl AsRef<Path>) -> Result<SessionList> {
     let root = root.as_ref();
     if !root.exists() {
-        return Ok(Vec::new());
+        return Ok(SessionList {
+            sessions: Vec::new(),
+            warnings: Vec::new(),
+        });
     }
 
     let mut entries = Vec::new();
@@ -41,10 +62,17 @@ pub fn list_sessions(root: impl AsRef<Path>) -> Result<Vec<SessionSummary>> {
     }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
 
-    entries
-        .into_iter()
-        .map(|(dir_id, path)| load_session_summary(dir_id, path))
-        .collect()
+    let mut sessions = Vec::new();
+    let mut warnings = Vec::new();
+    for (dir_id, path) in entries {
+        let (summary, warning) = load_session_summary(dir_id, path)?;
+        sessions.push(summary);
+        if let Some(warning) = warning {
+            warnings.push(warning);
+        }
+    }
+
+    Ok(SessionList { sessions, warnings })
 }
 
 pub fn delete_session_dir(root: impl AsRef<Path>, session_id: &str) -> Result<bool> {
@@ -68,15 +96,27 @@ pub fn delete_session_dir(root: impl AsRef<Path>, session_id: &str) -> Result<bo
     Ok(!target.exists())
 }
 
-fn load_session_summary(dir_id: String, path: PathBuf) -> Result<SessionSummary> {
+fn load_session_summary(
+    dir_id: String,
+    path: PathBuf,
+) -> Result<(SessionSummary, Option<SessionReadWarning>)> {
     let meta_path = path.join("meta.edn");
-    let meta = std::fs::read_to_string(&meta_path)
-        .ok()
-        .and_then(|raw| parse_map(&raw).ok());
+    let warning_message = match std::fs::read_to_string(&meta_path) {
+        Ok(raw) => match parse_map(&raw) {
+            Ok(meta) => return Ok((summary_from_meta(dir_id, path, &meta), None)),
+            Err(error) => Some(error.to_string()),
+        },
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => Some(error.to_string()),
+    };
 
-    Ok(match meta.as_ref() {
-        Some(meta) => summary_from_meta(dir_id, path, meta),
-        None => SessionSummary {
+    let warning = warning_message.map(|message| SessionReadWarning {
+        session_id: dir_id.clone(),
+        path: meta_path,
+        message,
+    });
+    Ok((
+        SessionSummary {
             id: dir_id,
             label: None,
             agent: None,
@@ -88,7 +128,8 @@ fn load_session_summary(dir_id: String, path: PathBuf) -> Result<SessionSummary>
             last_attached_at_millis: None,
             path,
         },
-    })
+        warning,
+    ))
 }
 
 fn safe_session_dir_name(session_id: &str) -> Option<&str> {

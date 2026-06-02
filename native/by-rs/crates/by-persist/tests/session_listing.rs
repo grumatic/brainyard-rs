@@ -1,4 +1,4 @@
-use by_persist::{delete_session_dir, list_sessions};
+use by_persist::{delete_session_dir, list_sessions, list_sessions_with_warnings};
 
 #[test]
 fn lists_session_dirs_with_optional_meta_edn() {
@@ -47,6 +47,29 @@ fn missing_root_is_an_empty_session_list() {
     let sessions = list_sessions(&missing).expect("missing root should not be fatal");
 
     assert!(sessions.is_empty());
+}
+
+#[test]
+fn corrupt_meta_edn_keeps_session_visible_with_warning() {
+    let root = tempfile::tempdir().expect("temp root");
+    let broken = root.path().join("broken");
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(broken.join("meta.edn"), "{:id ").unwrap();
+    std::fs::write(broken.join("messages.log"), "hello").unwrap();
+
+    let report = list_sessions_with_warnings(root.path()).expect("session list should load");
+
+    assert_eq!(report.sessions.len(), 1);
+    assert_eq!(report.sessions[0].id, "broken");
+    assert_eq!(report.sessions[0].label, None);
+    assert!(report.sessions[0].bytes >= 5);
+    assert_eq!(report.warnings.len(), 1);
+    assert_eq!(report.warnings[0].session_id, "broken");
+    assert!(report.warnings[0].path.ends_with("meta.edn"));
+    assert!(!report.warnings[0].message.is_empty());
+
+    let sessions = list_sessions(root.path()).expect("legacy list should remain tolerant");
+    assert_eq!(sessions[0].id, "broken");
 }
 
 #[test]

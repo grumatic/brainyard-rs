@@ -305,6 +305,27 @@ fn sessions_list_reads_fixture_root_without_writing() {
 }
 
 #[test]
+fn sessions_list_keeps_corrupt_meta_visible_and_warns_on_stderr() {
+    let root = tempfile::tempdir().unwrap();
+    let session = root.path().join("broken");
+    std::fs::create_dir_all(&session).unwrap();
+    std::fs::write(session.join("meta.edn"), "{:id ").unwrap();
+    std::fs::write(session.join("messages.log"), "hello").unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["sessions", "list", "--root"])
+        .arg(root.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("broken"))
+        .stdout(predicate::str::contains("session-id"))
+        .stderr(predicate::str::contains(
+            "[persist] skipping unreadable meta.edn for broken:",
+        ));
+}
+
+#[test]
 fn sessions_prune_deletes_fixture_session_by_positional_id() {
     let root = tempfile::tempdir().unwrap();
     let session = root.path().join("doomed");
