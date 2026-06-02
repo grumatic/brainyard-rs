@@ -2502,5 +2502,5 @@ fn default_config_path() -> Option<PathBuf> {
 }
 
 fn default_sessions_root() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".brainyard/sessions"))
+    process_dirs().and_then(|dirs| by_config::default_sessions_root(&dirs))
 }

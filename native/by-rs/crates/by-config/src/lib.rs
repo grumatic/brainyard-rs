@@ -192,6 +192,12 @@ pub fn default_memory_db_path(dirs: &BrainyardDirs, user_id: &str) -> Option<Pat
     })
 }
 
+pub fn default_sessions_root(dirs: &BrainyardDirs) -> Option<PathBuf> {
+    dirs.user_dir
+        .as_ref()
+        .map(|user_dir| user_dir.join(".brainyard/sessions"))
+}
+
 pub fn resolve_user_id(inputs: UserIdInputs<'_>) -> String {
     first_non_blank([
         inputs.explicit,

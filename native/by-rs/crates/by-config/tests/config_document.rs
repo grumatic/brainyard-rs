@@ -1,7 +1,7 @@
 use by_config::{
-    default_allowed_dirs, default_memory_db_path, load_dotenv_values, project_config_dir,
-    read_config, resolve_default_config_path, resolve_user_id, user_config_dir, AgentConfig,
-    BrainyardDirs, LlmConfig, PermissionsConfig, UserIdInputs,
+    default_allowed_dirs, default_memory_db_path, default_sessions_root, load_dotenv_values,
+    project_config_dir, read_config, resolve_default_config_path, resolve_user_id, user_config_dir,
+    AgentConfig, BrainyardDirs, LlmConfig, PermissionsConfig, UserIdInputs,
 };
 use std::fs;
 
@@ -278,6 +278,29 @@ fn default_memory_db_path_requires_user_dir() {
     );
 
     assert_eq!(default_memory_db_path(&dirs, "alice"), None);
+}
+
+#[test]
+fn default_sessions_root_matches_clojure_user_store_location() {
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let dirs = BrainyardDirs::resolve(project.path(), Some(home.path()), None::<&std::path::Path>);
+
+    assert_eq!(
+        default_sessions_root(&dirs),
+        Some(home.path().join(".brainyard/sessions"))
+    );
+}
+
+#[test]
+fn default_sessions_root_requires_user_dir() {
+    let dirs = BrainyardDirs::resolve(
+        "/tmp/project",
+        None::<&std::path::Path>,
+        None::<&std::path::Path>,
+    );
+
+    assert_eq!(default_sessions_root(&dirs), None);
 }
 
 #[test]
