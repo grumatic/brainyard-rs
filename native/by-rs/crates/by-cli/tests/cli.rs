@@ -2274,6 +2274,29 @@ fn ask_dry_run_renders_bedrock_converse_request_without_network() {
 }
 
 #[test]
+fn ask_dry_run_accepts_short_provider_and_model_flags_like_clojure() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "-p",
+            "bedrock",
+            "-m",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"bedrock\""))
+        .stdout(predicate::str::contains("\"operation\": \"Converse\""))
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"amazon.nova-lite-v1:0\"",
+        ))
+        .stdout(predicate::str::contains("\"text\": \"What is 2+2?\""));
+}
+
+#[test]
 fn ask_dry_run_renders_openai_chat_completions_request_without_network() {
     Command::cargo_bin("by-rs")
         .unwrap()
@@ -2527,6 +2550,20 @@ fn ask_missing_question_precedes_execution_mode_requirement() {
             "--model",
             "amazon.nova-lite-v1:0",
         ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "Error: question argument is required.",
+        ))
+        .stdout(predicate::str::contains("Usage: by ask [options] QUESTION"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn ask_missing_question_with_short_provider_and_model_flags_matches_clojure() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["ask", "-p", "bedrock", "-m", "amazon.nova-lite-v1:0"])
         .assert()
         .failure()
         .stdout(predicate::str::contains(
