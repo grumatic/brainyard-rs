@@ -231,9 +231,9 @@ pub fn default_bedrock_region() -> &'static str {
 }
 
 pub async fn converse_bedrock(request: BedrockConverseRequest) -> Result<BedrockConverseResponse> {
+    let sdk_request = build_bedrock_sdk_converse_request(&request)?;
     let sdk_config = load_bedrock_sdk_config(&request.runtime).await;
     let client = Client::new(&sdk_config);
-    let sdk_request = build_bedrock_sdk_converse_request(&request)?;
 
     let mut builder = client
         .converse()
