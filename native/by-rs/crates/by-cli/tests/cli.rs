@@ -2357,6 +2357,48 @@ fn ask_missing_question_matches_clojure_usage_error() {
 }
 
 #[test]
+fn ask_missing_question_precedes_execution_mode_requirement() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "Error: question argument is required.",
+        ))
+        .stdout(predicate::str::contains("Usage: by ask [options] QUESTION"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn ask_blank_question_matches_clojure_usage_error() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--dry-run",
+            "   ",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "Error: question argument is required.",
+        ))
+        .stdout(predicate::str::contains("Usage: by ask [options] QUESTION"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn ask_rejects_dry_run_and_live_together() {
     Command::cargo_bin("by-rs")
         .unwrap()
