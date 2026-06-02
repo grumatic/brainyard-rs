@@ -24,8 +24,8 @@ fn clojure_oracle_registry_fixture_is_loadable() {
         registry
             .agents
             .iter()
-            .any(|agent| agent.id == "coact-agent"),
-        "oracle fixture should include the built-in coact-agent"
+            .any(|agent| agent.id == "coact-agent" && agent.agent_type == "agent"),
+        "oracle fixture should include the built-in coact-agent as an agent entry"
     );
     assert!(
         registry.agents.iter().any(|agent| agent.id == "main-agent"),
@@ -97,8 +97,8 @@ fn embedded_clojure_oracle_registry_is_loadable() {
         registry
             .agents
             .iter()
-            .any(|agent| agent.id == "coact-agent"),
-        "embedded registry should include the built-in coact-agent"
+            .any(|agent| agent.id == "coact-agent" && agent.agent_type == "agent"),
+        "embedded registry should include the built-in coact-agent as an agent entry"
     );
     assert!(
         registry

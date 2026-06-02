@@ -32,6 +32,7 @@ pub struct ToolDescriptor {
 pub struct AgentDescriptor {
     pub id: String,
     pub name: String,
+    pub agent_type: String,
     pub description: Option<String>,
     pub max_iterations: Option<usize>,
 }
@@ -204,6 +205,7 @@ fn raw_agent_from_value(value: Value) -> Result<AgentDescriptor> {
     Ok(AgentDescriptor {
         id,
         name,
+        agent_type: raw.agent_type.unwrap_or_else(|| "agent".to_string()),
         description: raw.description,
         max_iterations: raw.max_iterations,
     })
@@ -278,6 +280,8 @@ struct RawTool {
 struct RawAgent {
     id: Option<String>,
     name: Option<String>,
+    #[serde(rename = "type")]
+    agent_type: Option<String>,
     description: Option<String>,
     #[serde(
         rename = "maxIterations",

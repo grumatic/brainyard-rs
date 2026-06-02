@@ -5,7 +5,7 @@ fn loads_tools_agents_and_models_from_fixture_object() {
     let registry = load_registry_str(
         r#"{
           "tools": [{"id": "code$eval", "type": "command", "description": "Evaluate code", "inputSchema": ["map"]}],
-          "agents": [{"id": "coder", "name": "Coder", "description": "Writes code", "maxIterations": 12}],
+          "agents": [{"id": "coder", "name": "Coder", "type": "agent", "description": "Writes code", "maxIterations": 12}],
           "models": [{"provider": "bedrock", "id": "amazon.nova-lite-v1:0", "description": "Nova Lite"}],
           "mcpServers": [{"name": "gmail", "transport": "stdio", "config": {"command": "bash", "args": ["-c", "npx -y mcp-remote https://gmailmcp.googleapis.com/mcp/v1"]}, "enabled": false, "autoRegisterTools": true}]
         }"#,
@@ -19,6 +19,7 @@ fn loads_tools_agents_and_models_from_fixture_object() {
     assert_eq!(registry.agents.len(), 1);
     assert_eq!(registry.agents[0].id, "coder");
     assert_eq!(registry.agents[0].name, "Coder");
+    assert_eq!(registry.agents[0].agent_type, "agent");
     assert_eq!(registry.agents[0].max_iterations, Some(12));
     assert_eq!(registry.models[0].provider, "bedrock");
     assert_eq!(registry.models[0].id, "amazon.nova-lite-v1:0");
@@ -41,6 +42,7 @@ fn uses_agent_name_as_id_when_id_is_missing() {
 
     assert_eq!(registry.agents[0].id, "reviewer");
     assert_eq!(registry.agents[0].name, "reviewer");
+    assert_eq!(registry.agents[0].agent_type, "agent");
 }
 
 #[test]
