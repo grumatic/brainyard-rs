@@ -704,7 +704,23 @@ fn print_ask(args: AskRequest) -> Result<()> {
                 .as_ref()
                 .and_then(|config| config.default_model.clone())
         })
-        .context("--model is required for bedrock ask")?;
+        .context("--model is required for ask")?;
+
+    if let Some(path) = args.fixture_response {
+        let raw: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read response fixture {}", path.display()))?,
+        )
+        .with_context(|| format!("failed to parse response fixture {}", path.display()))?;
+        let projected = by_llm::reshape_provider_response(&resolved_provider, raw)?;
+        let text = by_llm::projected_response_text(&projected);
+        if text.is_empty() {
+            println!("{}", serde_json::to_string_pretty(&projected)?);
+        } else {
+            println!("{text}");
+        }
+        return Ok(());
+    }
 
     if resolved_provider != "bedrock" {
         bail!("by-rs ask currently supports provider 'bedrock' only");
@@ -745,27 +761,6 @@ fn print_ask(args: AskRequest) -> Result<()> {
             "request": request,
         });
         println!("{}", serde_json::to_string_pretty(&dry_run)?);
-        return Ok(());
-    }
-
-    if let Some(path) = args.fixture_response {
-        let raw: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).with_context(|| {
-                format!("failed to read Bedrock response fixture {}", path.display())
-            })?)
-            .with_context(|| {
-                format!(
-                    "failed to parse Bedrock response fixture {}",
-                    path.display()
-                )
-            })?;
-        let projected = by_llm::reshape_bedrock_response(raw);
-        let text = by_llm::projected_response_text(&projected);
-        if text.is_empty() {
-            println!("{}", serde_json::to_string_pretty(&projected)?);
-        } else {
-            println!("{text}");
-        }
         return Ok(());
     }
 

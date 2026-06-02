@@ -254,6 +254,76 @@ pub fn reshape_bedrock_response(response: Value) -> Value {
     Value::Object(projected)
 }
 
+pub fn reshape_openai_compatible_response(response: Value) -> Value {
+    let choice = response
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first());
+    let message = choice.and_then(|choice| choice.get("message"));
+    let text_blocks = openai_text_blocks(message.and_then(|message| message.get("content")));
+    let role = message
+        .and_then(|message| message.get("role"))
+        .and_then(Value::as_str)
+        .unwrap_or("assistant");
+
+    let mut projected = Map::new();
+    projected.insert("content".to_string(), Value::Array(text_blocks));
+    projected.insert("role".to_string(), Value::String(role.to_string()));
+    projected.insert(
+        "stop_reason".to_string(),
+        choice
+            .and_then(|choice| choice.get("finish_reason"))
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+
+    if let Some(usage) = response.get("usage").and_then(Value::as_object) {
+        let usage = project_openai_usage(usage);
+        if !usage.is_empty() {
+            projected.insert("usage".to_string(), Value::Object(usage));
+        }
+    }
+
+    Value::Object(projected)
+}
+
+pub fn reshape_anthropic_response(response: Value) -> Value {
+    let text_blocks = anthropic_text_blocks(response.get("content"));
+    let role = response
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or("assistant");
+
+    let mut projected = Map::new();
+    projected.insert("content".to_string(), Value::Array(text_blocks));
+    projected.insert("role".to_string(), Value::String(role.to_string()));
+    projected.insert(
+        "stop_reason".to_string(),
+        response.get("stop_reason").cloned().unwrap_or(Value::Null),
+    );
+
+    if let Some(usage) = response.get("usage").and_then(Value::as_object) {
+        let usage = project_anthropic_usage(usage);
+        if !usage.is_empty() {
+            projected.insert("usage".to_string(), Value::Object(usage));
+        }
+    }
+
+    Value::Object(projected)
+}
+
+pub fn reshape_provider_response(provider: &str, response: Value) -> Result<Value> {
+    match provider.trim() {
+        "bedrock" => Ok(reshape_bedrock_response(response)),
+        "anthropic" | "anthropic-max" => Ok(reshape_anthropic_response(response)),
+        "openai" | "google" | "azure" | "groq" | "together" | "fireworks" | "openrouter"
+        | "ollama" | "mistral" | "deepseek" | "apple-fm" => {
+            Ok(reshape_openai_compatible_response(response))
+        }
+        other => bail!("fixture response replay does not support provider '{other}'"),
+    }
+}
+
 pub fn bedrock_drops_temperature(model: &str) -> bool {
     matches!(
         model,
@@ -530,6 +600,90 @@ fn project_usage(usage: &Map<String, Value>) -> Map<String, Value> {
         "cache_creation_input_tokens",
     );
     projected
+}
+
+fn project_openai_usage(usage: &Map<String, Value>) -> Map<String, Value> {
+    let mut projected = Map::new();
+    copy_usage_key(usage, &mut projected, "prompt_tokens", "input_tokens");
+    copy_usage_key(usage, &mut projected, "completion_tokens", "output_tokens");
+    copy_usage_key(usage, &mut projected, "total_tokens", "total_tokens");
+
+    if let Some(cached_tokens) = usage
+        .get("prompt_tokens_details")
+        .and_then(Value::as_object)
+        .and_then(|details| details.get("cached_tokens"))
+    {
+        projected.insert("cache_read_input_tokens".to_string(), cached_tokens.clone());
+    }
+
+    projected
+}
+
+fn project_anthropic_usage(usage: &Map<String, Value>) -> Map<String, Value> {
+    let mut projected = Map::new();
+    copy_usage_key(usage, &mut projected, "input_tokens", "input_tokens");
+    copy_usage_key(usage, &mut projected, "output_tokens", "output_tokens");
+    copy_usage_key(usage, &mut projected, "total_tokens", "total_tokens");
+    copy_usage_key(
+        usage,
+        &mut projected,
+        "cache_read_input_tokens",
+        "cache_read_input_tokens",
+    );
+    copy_usage_key(
+        usage,
+        &mut projected,
+        "cache_creation_input_tokens",
+        "cache_creation_input_tokens",
+    );
+
+    projected
+}
+
+fn openai_text_blocks(content: Option<&Value>) -> Vec<Value> {
+    match content {
+        Some(Value::String(text)) => vec![json!({"type": "text", "text": text})],
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(openai_content_part_text)
+            .map(|text| json!({"type": "text", "text": text}))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn openai_content_part_text(part: &Value) -> Option<&str> {
+    if let Some(text) = part.as_str() {
+        return Some(text);
+    }
+
+    let object = part.as_object()?;
+    let part_type = object.get("type").and_then(Value::as_str);
+    if matches!(part_type, Some("text") | Some("output_text") | None) {
+        object.get("text").and_then(Value::as_str)
+    } else {
+        None
+    }
+}
+
+fn anthropic_text_blocks(content: Option<&Value>) -> Vec<Value> {
+    content
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter_map(|block| {
+                    let object = block.as_object()?;
+                    if object.get("type").and_then(Value::as_str) == Some("text") {
+                        object.get("text").and_then(Value::as_str)
+                    } else {
+                        None
+                    }
+                })
+                .map(|text| json!({"type": "text", "text": text}))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn copy_usage_key(

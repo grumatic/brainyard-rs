@@ -897,6 +897,60 @@ fn ask_fixture_response_replays_bedrock_output_without_network() {
 }
 
 #[test]
+fn ask_fixture_response_replays_openai_output_without_network() {
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/openai/chat-completion-response.json");
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .env_remove("AWS_REGION")
+        .env_remove("AWS_DEFAULT_REGION")
+        .env_remove("AWS_PROFILE")
+        .env_remove("AWS_DEFAULT_PROFILE")
+        .args([
+            "ask",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5",
+            "--fixture-response",
+        ])
+        .arg(fixture)
+        .arg("What is 2+2?")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello from OpenAI fixture"));
+}
+
+#[test]
+fn ask_fixture_response_replays_anthropic_output_without_network() {
+    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/anthropic/messages-response.json");
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BY_NO_DOTENV", "1")
+        .env_remove("AWS_REGION")
+        .env_remove("AWS_DEFAULT_REGION")
+        .env_remove("AWS_PROFILE")
+        .env_remove("AWS_DEFAULT_PROFILE")
+        .args([
+            "ask",
+            "--provider",
+            "anthropic",
+            "--model",
+            "claude-sonnet-4-5",
+            "--fixture-response",
+        ])
+        .arg(fixture)
+        .arg("What is 2+2?")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello from Anthropic fixture"));
+}
+
+#[test]
 fn ask_fixture_response_rejects_other_execution_modes() {
     let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/bedrock/converse-response.json");
