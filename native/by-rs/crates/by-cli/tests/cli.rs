@@ -74,6 +74,8 @@ fn root_level_run_flags_are_routed_to_run_command() {
             "bedrock",
             "--model",
             "amazon.nova-lite-v1:0",
+            "--user-id",
+            "alice",
         ])
         .assert()
         .failure()
@@ -692,6 +694,28 @@ fn memory_inspect_reports_schema_and_counts_without_writing() {
         .stdout(predicate::str::contains("semantic_facts"))
         .stdout(predicate::str::contains("semantic_fts"))
         .stdout(predicate::str::contains("memory_audit"));
+}
+
+#[test]
+fn ask_dry_run_accepts_user_id_flag_from_main_contract() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "ask",
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--user-id",
+            "alice",
+            "--dry-run",
+            "What is 2+2?",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "\"modelId\": \"amazon.nova-lite-v1:0\"",
+        ));
 }
 
 #[test]

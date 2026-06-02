@@ -33,6 +33,9 @@ enum Commands {
         /// Model name override.
         #[arg(long, short = 'm', value_name = "MODEL")]
         model: Option<String>,
+        /// User identity for sessions/memory.
+        #[arg(long = "user-id", short = 'u', value_name = "ID", hide = true)]
+        user_id: Option<String>,
         /// Inline mode (no alt screen).
         #[arg(long, short = 'i', action = ArgAction::SetTrue)]
         inline: bool,
@@ -98,6 +101,9 @@ enum Commands {
         /// Max agent iterations. Reserved for later full agent execution parity.
         #[arg(long, short = 'n', value_name = "N")]
         max_iterations: Option<usize>,
+        /// User identity for sessions/memory. Reserved for later full agent execution parity.
+        #[arg(long = "user-id", short = 'u', value_name = "ID", hide = true)]
+        user_id: Option<String>,
         /// AWS region for Bedrock. Falls back to AWS_REGION, AWS_DEFAULT_REGION, then us-east-1.
         #[arg(long, value_name = "REGION")]
         region: Option<String>,
@@ -300,6 +306,7 @@ fn run() -> Result<()> {
             agent: _agent,
             provider: _provider,
             model: _model,
+            user_id: _user_id,
             inline: _inline,
             no_inline: _no_inline,
             verbose: _verbose,
@@ -321,6 +328,7 @@ fn run() -> Result<()> {
             provider,
             model,
             max_iterations: _max_iterations,
+            user_id: _user_id,
             region,
             aws_profile,
             temperature,
