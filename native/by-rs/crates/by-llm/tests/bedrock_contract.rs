@@ -6,7 +6,8 @@ use aws_sdk_bedrockruntime::{
     },
 };
 use by_llm::{
-    build_bedrock_request, build_bedrock_request_with_cache_zones, default_bedrock_region,
+    bedrock_drops_temperature, bedrock_supports_prompt_cache, build_bedrock_request,
+    build_bedrock_request_with_cache_zones, default_bedrock_region,
     project_bedrock_converse_output, project_bedrock_sdk_converse_request,
     reshape_bedrock_response, resolve_bedrock_runtime_options, BedrockConfig,
     BedrockConverseRequest, BedrockRuntimeInputs, BedrockRuntimeOptions, CacheZone, ChatMessage,
@@ -155,6 +156,76 @@ fn bedrock_request_can_drop_temperature_for_models_that_reject_it() {
             "inferenceConfig": {"maxTokens": 128}
         })
     );
+}
+
+#[test]
+fn bedrock_prompt_cache_default_matrix_matches_clojure_create_lm() {
+    for model in [
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-opus-4-7",
+        "anthropic.claude-haiku-4-5-20251001-v1:0",
+        "apac.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "amazon.nova-pro-v1:0",
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-micro-v1:0",
+        "apac.amazon.nova-lite-v1:0",
+    ] {
+        assert!(
+            bedrock_supports_prompt_cache(model),
+            "expected Bedrock prompt cache support for {model}"
+        );
+    }
+
+    for model in [
+        "meta.llama3-3-70b-instruct-v1:0",
+        "mistral.mistral-large-2407-v1:0",
+        "cohere.command-r-plus-v1:0",
+        "deepseek.r1-v1:0",
+        "openai.gpt-oss-120b-1:0",
+        "qwen.qwen3-32b-v1:0",
+        "ai21.jamba-1-5-large-v1:0",
+        "writer.palmyra-x5-v1:0",
+    ] {
+        assert!(
+            !bedrock_supports_prompt_cache(model),
+            "expected no Bedrock prompt cache support for {model}"
+        );
+    }
+}
+
+#[test]
+fn bedrock_temperature_drop_matrix_matches_clojure_create_lm() {
+    for model in [
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "o1",
+        "o1-mini",
+        "o3",
+        "o3-mini",
+        "o4-mini",
+        "global.anthropic.claude-opus-4-7",
+        "us.anthropic.claude-opus-4-7",
+        "anthropic.claude-opus-4-7",
+        "claude-opus-4-7",
+    ] {
+        assert!(
+            bedrock_drops_temperature(model),
+            "expected Bedrock temperature drop for {model}"
+        );
+    }
+
+    for model in [
+        "amazon.nova-lite-v1:0",
+        "openai.gpt-oss-120b-1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "meta.llama3-3-70b-instruct-v1:0",
+    ] {
+        assert!(
+            !bedrock_drops_temperature(model),
+            "expected Bedrock temperature to be preserved for {model}"
+        );
+    }
 }
 
 #[test]
