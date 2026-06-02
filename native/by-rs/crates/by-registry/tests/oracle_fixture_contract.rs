@@ -1,4 +1,6 @@
-use by_registry::{load_embedded_oracle_registry, load_registry_path, load_tools_path};
+use by_registry::{
+    load_embedded_oracle_registry, load_mcp_servers_path, load_registry_path, load_tools_path,
+};
 
 const ORACLE_REGISTRY: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -7,6 +9,10 @@ const ORACLE_REGISTRY: &str = concat!(
 const ORACLE_TOOLS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../fixtures/oracle/tools.json"
+);
+const ORACLE_MCP_SERVERS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../fixtures/oracle/mcp-servers.json"
 );
 
 #[test]
@@ -43,6 +49,36 @@ fn clojure_oracle_registry_fixture_is_loadable() {
             .any(|tool| tool.id == "grep" && tool.tool_type == "tool"),
         "oracle fixture should include tool entries separately from agents"
     );
+    assert!(
+        registry
+            .mcp_servers
+            .iter()
+            .any(|server| server.name == "gmail"
+                && server.transport == "stdio"
+                && !server.enabled
+                && server.auto_register_tools
+                && server.config["command"] == "bash"
+                && server.config["args"][0] == "-c"
+                && server.config["args"][1]
+                    .as_str()
+                    .is_some_and(|arg| arg.contains("gmailmcp.googleapis.com/mcp/v1"))),
+        "oracle fixture should include the Gmail hosted MCP seed"
+    );
+    assert!(
+        registry
+            .mcp_servers
+            .iter()
+            .any(|server| server.name == "google-calendar"
+                && server.transport == "stdio"
+                && !server.enabled
+                && server.auto_register_tools
+                && server.config["command"] == "bash"
+                && server.config["args"][0] == "-c"
+                && server.config["args"][1]
+                    .as_str()
+                    .is_some_and(|arg| arg.contains("calendarmcp.googleapis.com/mcp/v1"))),
+        "oracle fixture should include the Google Calendar hosted MCP seed"
+    );
 }
 
 #[test]
@@ -68,6 +104,13 @@ fn embedded_clojure_oracle_registry_is_loadable() {
         registry.tools.iter().any(|tool| tool.id == "code$eval"),
         "embedded registry should preserve tool metadata"
     );
+    assert!(
+        registry
+            .mcp_servers
+            .iter()
+            .any(|server| server.name == "gmail"),
+        "embedded registry should preserve hosted MCP server seeds"
+    );
 }
 
 #[test]
@@ -79,5 +122,26 @@ fn standalone_clojure_oracle_tools_fixture_is_loadable() {
             && tool.tool_type == "command"
             && tool.input_schema.is_array()),
         "tools fixture should preserve command ids, types, and schemas"
+    );
+}
+
+#[test]
+fn standalone_clojure_oracle_mcp_servers_fixture_is_loadable() {
+    let servers =
+        load_mcp_servers_path(ORACLE_MCP_SERVERS).expect("Clojure oracle MCP fixture should load");
+
+    assert!(
+        servers.iter().any(|server| server.name == "gmail"
+            && server.config["args"][1]
+                .as_str()
+                .is_some_and(|arg| arg.contains("GCP_OAUTH_CLIENT_ID"))),
+        "MCP fixture should preserve the Gmail static OAuth env bridge"
+    );
+    assert!(
+        servers.iter().any(|server| server.name == "google-calendar"
+            && server.config["args"][1]
+                .as_str()
+                .is_some_and(|arg| arg.contains("GCP_OAUTH_CLIENT_SECRET"))),
+        "MCP fixture should preserve the Google Calendar static OAuth env bridge"
     );
 }

@@ -12,6 +12,7 @@ pub struct RegistryFixture {
     pub tools: Vec<ToolDescriptor>,
     pub agents: Vec<AgentDescriptor>,
     pub models: Vec<ModelDescriptor>,
+    pub mcp_servers: Vec<McpServerDescriptor>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -42,6 +43,15 @@ pub struct ModelDescriptor {
     pub region: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct McpServerDescriptor {
+    pub name: String,
+    pub transport: String,
+    pub config: Value,
+    pub enabled: bool,
+    pub auto_register_tools: bool,
+}
+
 impl ModelDescriptor {
     pub fn label(&self) -> String {
         format!("{}:{}", self.provider, self.id)
@@ -66,6 +76,13 @@ pub fn load_tools_path(path: impl AsRef<Path>) -> Result<Vec<ToolDescriptor>> {
     load_tools_str(&raw)
 }
 
+pub fn load_mcp_servers_path(path: impl AsRef<Path>) -> Result<Vec<McpServerDescriptor>> {
+    let path = path.as_ref();
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read MCP servers fixture {}", path.display()))?;
+    load_mcp_servers_str(&raw)
+}
+
 pub fn load_registry_str(input: &str) -> Result<RegistryFixture> {
     let value: Value = serde_json::from_str(input).context("invalid registry JSON")?;
     match value {
@@ -76,6 +93,7 @@ pub fn load_registry_str(input: &str) -> Result<RegistryFixture> {
                 .map(raw_agent_from_value)
                 .collect::<Result<Vec<_>>>()?,
             models: Vec::new(),
+            mcp_servers: Vec::new(),
         }),
         Value::Object(mut object) => {
             let tools = take_array(&mut object, "tools")?
@@ -90,10 +108,12 @@ pub fn load_registry_str(input: &str) -> Result<RegistryFixture> {
                 .into_iter()
                 .map(raw_model_from_value)
                 .collect::<Result<Vec<_>>>()?;
+            let mcp_servers = take_mcp_servers(&mut object)?.unwrap_or_default();
             Ok(RegistryFixture {
                 tools,
                 agents,
                 models,
+                mcp_servers,
             })
         }
         _ => Err(anyhow!("registry fixture must be a JSON object or array")),
@@ -115,11 +135,43 @@ pub fn load_tools_str(input: &str) -> Result<Vec<ToolDescriptor>> {
     }
 }
 
+pub fn load_mcp_servers_str(input: &str) -> Result<Vec<McpServerDescriptor>> {
+    let value: Value = serde_json::from_str(input).context("invalid MCP servers JSON")?;
+    mcp_servers_from_value(value)
+}
+
 fn take_array(object: &mut serde_json::Map<String, Value>, key: &str) -> Result<Vec<Value>> {
     match object.remove(key) {
         Some(Value::Array(items)) => Ok(items),
         Some(_) => Err(anyhow!("registry field '{key}' must be an array")),
         None => Ok(Vec::new()),
+    }
+}
+
+fn take_mcp_servers(
+    object: &mut serde_json::Map<String, Value>,
+) -> Result<Option<Vec<McpServerDescriptor>>> {
+    for key in ["mcpServers", "mcp-servers", "mcp_servers"] {
+        if let Some(value) = object.remove(key) {
+            return mcp_servers_from_value(value).map(Some);
+        }
+    }
+    Ok(None)
+}
+
+fn mcp_servers_from_value(value: Value) -> Result<Vec<McpServerDescriptor>> {
+    match value {
+        Value::Array(items) => items
+            .into_iter()
+            .map(raw_mcp_server_from_value)
+            .collect::<Result<Vec<_>>>(),
+        Value::Object(object) => object
+            .into_iter()
+            .map(|(name, value)| raw_mcp_server_from_named_value(name, value))
+            .collect::<Result<Vec<_>>>(),
+        _ => Err(anyhow!(
+            "MCP servers fixture must be a JSON object or array"
+        )),
     }
 }
 
@@ -170,6 +222,37 @@ fn raw_model_from_value(value: Value) -> Result<ModelDescriptor> {
     })
 }
 
+fn raw_mcp_server_from_value(value: Value) -> Result<McpServerDescriptor> {
+    raw_mcp_server_from_named_value(String::new(), value)
+}
+
+fn raw_mcp_server_from_named_value(
+    fallback_name: String,
+    value: Value,
+) -> Result<McpServerDescriptor> {
+    let raw: RawMcpServer =
+        serde_json::from_value(value).context("invalid MCP server descriptor")?;
+    let name = raw
+        .name
+        .or(raw.id)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback_name);
+    if name.trim().is_empty() {
+        return Err(anyhow!("MCP server descriptor requires 'name' or 'id'"));
+    }
+
+    Ok(McpServerDescriptor {
+        name,
+        transport: raw
+            .transport
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("MCP server descriptor requires 'transport'"))?,
+        config: raw.config.unwrap_or_else(|| json!({})),
+        enabled: raw.enabled.unwrap_or(false),
+        auto_register_tools: raw.auto_register_tools.unwrap_or(false),
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct RawTool {
     id: Option<String>,
@@ -203,4 +286,19 @@ struct RawModel {
     model: Option<String>,
     description: Option<String>,
     region: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawMcpServer {
+    name: Option<String>,
+    id: Option<String>,
+    transport: Option<String>,
+    config: Option<Value>,
+    enabled: Option<bool>,
+    #[serde(
+        rename = "autoRegisterTools",
+        alias = "auto-register-tools",
+        alias = "auto_register_tools"
+    )]
+    auto_register_tools: Option<bool>,
 }

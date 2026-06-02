@@ -2,6 +2,7 @@
   "Exports deterministic Clojure-side fixtures for the Rust port test harness."
   (:require
    [ai.brainyard.agent.interface :as agent]
+   [ai.brainyard.agent.mcp.integration :as mcp]
    [ai.brainyard.clj-llm.interface :as clj-llm]
    [clojure.data.json :as json]
    [clojure.java.io :as io]
@@ -85,6 +86,17 @@
       (:config-schema meta)
       (assoc :configSchema (json-safe (:config-schema meta))))))
 
+(defn- mcp-server-entry [[id spec]]
+  (let [server-id (or (present-string id)
+                      (present-string (:id spec))
+                      (present-string (:name spec)))]
+    (array-map
+     :name server-id
+     :transport (present-string (:transport spec))
+     :config (json-safe (:config spec))
+     :enabled (true? (:enabled spec))
+     :autoRegisterTools (not (false? (:auto-register-tools spec))))))
+
 (defn- registry-document []
   (let [tools (->> (agent/get-tool-defs)
                    (map tool-entry)
@@ -97,11 +109,16 @@
         models (->> (clj-llm/get-popular-models)
                     (map model-entry)
                     (sort-by (juxt :provider :id))
-                    vec)]
+                    vec)
+        mcp-servers (->> (mcp/create-seed-mcp-config)
+                         (map mcp-server-entry)
+                         (sort-by :name)
+                         vec)]
     (array-map
      :tools tools
      :agents agents
-     :models models)))
+     :models models
+     :mcpServers mcp-servers)))
 
 (defn- write-json-file! [file value]
   (let [file (io/file file)]
@@ -134,12 +151,14 @@
           (write-json-file! (io/file out-dir "registry.json") registry)
           (write-json-file! (io/file out-dir "tools.json") (:tools registry))
           (write-json-file! (io/file out-dir "agents.json") (:agents registry))
-          (write-json-file! (io/file out-dir "models.json") (:models registry)))
+          (write-json-file! (io/file out-dir "models.json") (:models registry))
+          (write-json-file! (io/file out-dir "mcp-servers.json") (:mcpServers registry)))
         (write-json-file! (io/file out-dir "metadata.json")
                           (array-map :schemaVersion 1
                                      :exports ["registry.json"
                                                "tools.json"
                                                "agents.json"
-                                               "models.json"]
+                                               "models.json"
+                                               "mcp-servers.json"]
                                      :source "clojure"))
         (println (str "Wrote Clojure oracle fixtures to " (.getPath out-dir)))))))
