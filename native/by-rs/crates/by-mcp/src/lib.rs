@@ -585,6 +585,43 @@ pub fn project_tool_calls_command_result(
     }))
 }
 
+pub fn project_tool_call_errors_command_result(
+    calls: &[McpToolCall],
+    errors: &[String],
+) -> Result<Value> {
+    if calls.len() != errors.len() {
+        bail!(
+            "tool call count ({}) must match error count ({})",
+            calls.len(),
+            errors.len()
+        );
+    }
+
+    let results = calls
+        .iter()
+        .zip(errors)
+        .map(|(call, error)| {
+            json!({
+                "server-name": call.server_name,
+                "tool-name": call.tool_name,
+                "tool-args": call.tool_args,
+                "tool-result": {
+                    "success": false,
+                    "error": error,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let total = results.len();
+
+    Ok(json!({
+        "result": {
+            "tool-results": results,
+            "total": total,
+        }
+    }))
+}
+
 pub fn project_read_resource_command_result(
     server_name: &str,
     resource_uri: &str,

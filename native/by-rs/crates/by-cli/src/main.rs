@@ -1475,6 +1475,18 @@ fn print_mcp_call_tool(
                 fixture_response.display()
             )
         })?;
+        if let Some(error) = by_mcp::extract_jsonrpc_error_message_from_json(&raw, request_id)
+            .with_context(|| {
+                format!(
+                    "failed to project MCP tools/call response fixture {}",
+                    fixture_response.display()
+                )
+            })?
+        {
+            let output = by_mcp::project_tool_call_errors_command_result(&calls, &[error])?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            return Ok(());
+        }
         let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
             format!(
                 "failed to project MCP tools/call response fixture {}",

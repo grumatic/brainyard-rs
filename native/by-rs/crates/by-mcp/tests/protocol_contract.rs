@@ -10,10 +10,11 @@ use by_mcp::{
     project_server_capabilities_command_result, project_server_health_command_result,
     project_server_info_command_result, project_server_prompts_command_result,
     project_server_resources_command_result, project_server_unhealthy_command_result,
-    project_tool_calls_command_result, project_tools_list_command_result, read_resource_request,
-    registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
-    tool_call_request_from_call, tool_calls_from_value, tools_from_list_result,
-    validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
+    project_tool_call_errors_command_result, project_tool_calls_command_result,
+    project_tools_list_command_result, read_resource_request, registered_tool_id,
+    safe_clojure_symbol_name, stdio_initialize_request, tool_call_request_from_call,
+    tool_calls_from_value, tools_from_list_result, validate_server_config, CLIENT_NAME,
+    CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
 use serde_json::json;
@@ -472,6 +473,28 @@ fn mcp_tool_call_projection_matches_clojure_command_shape() {
             }
         })
     );
+
+    assert_eq!(
+        project_tool_call_errors_command_result(&calls, &["call failed".to_string()]).unwrap(),
+        json!({
+            "result": {
+                "tool-results": [
+                    {
+                        "server-name": "filesystem",
+                        "tool-name": "read_file",
+                        "tool-args": [{"name": "path", "value": "/tmp/a.txt"}],
+                        "tool-result": {
+                            "success": false,
+                            "error": "call failed"
+                        }
+                    }
+                ],
+                "total": 1
+            }
+        })
+    );
+
+    assert!(project_tool_call_errors_command_result(&calls, &[]).is_err());
 }
 
 #[test]

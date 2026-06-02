@@ -1017,6 +1017,47 @@ fn mcp_call_tool_hidden_command_projects_response_fixture_to_command_result() {
 }
 
 #[test]
+fn mcp_call_tool_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("tools-call-error-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":25,"error":{"code":-32000,"message":"tool failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "call-tool",
+            "--server-name",
+            "filesystem",
+            "--tool-name",
+            "read_file",
+            "--tool-args",
+            r#"{"path":"/tmp/a.txt"}"#,
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "25"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 1);
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["success"],
+        false
+    );
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["error"],
+        "tool failed"
+    );
+}
+
+#[test]
 fn mcp_read_resource_hidden_command_projects_request_without_network() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()
