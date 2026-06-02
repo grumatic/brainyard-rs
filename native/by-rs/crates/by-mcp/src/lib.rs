@@ -638,6 +638,19 @@ pub fn project_read_resource_command_result(
     }))
 }
 
+pub fn project_read_resource_error_command_result(
+    server_name: &str,
+    resource_uri: &str,
+    error: &str,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(resource_uri, "resource_uri")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to read resource '{resource_uri}' from '{server_name}': {error}")
+    }))
+}
+
 pub fn project_get_prompt_command_result(
     server_name: &str,
     prompt_name: &str,
@@ -651,6 +664,19 @@ pub fn project_get_prompt_command_result(
             "prompt-name": prompt_name,
             "prompt": prompt,
         }
+    }))
+}
+
+pub fn project_get_prompt_error_command_result(
+    server_name: &str,
+    prompt_name: &str,
+    error: &str,
+) -> Result<Value> {
+    ensure_nonblank(server_name, "server_name")?;
+    ensure_nonblank(prompt_name, "prompt_name")?;
+    ensure_nonblank(error, "error")?;
+    Ok(json!({
+        "error": format!("Failed to get prompt '{prompt_name}' from '{server_name}': {error}")
     }))
 }
 

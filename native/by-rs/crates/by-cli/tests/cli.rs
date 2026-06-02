@@ -1120,6 +1120,40 @@ fn mcp_read_resource_hidden_command_projects_response_fixture_to_command_result(
 }
 
 #[test]
+fn mcp_read_resource_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("resources-read-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":35,"error":{"code":-32000,"message":"resource failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "read-resource",
+            "--server-name",
+            "filesystem",
+            "--resource-uri",
+            "file:///tmp/a.txt",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "35"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "Failed to read resource 'file:///tmp/a.txt' from 'filesystem': resource failed"
+    );
+}
+
+#[test]
 fn mcp_get_prompt_hidden_command_projects_request_without_network() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()
@@ -1181,6 +1215,40 @@ fn mcp_get_prompt_hidden_command_projects_response_fixture_to_command_result() {
     assert_eq!(
         value["result"]["prompt"]["messages"][0]["content"]["text"],
         "hello"
+    );
+}
+
+#[test]
+fn mcp_get_prompt_hidden_command_projects_error_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("prompts-get-error.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":36,"error":{"code":-32000,"message":"prompt failed"}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "get-prompt",
+            "--server-name",
+            "linear",
+            "--prompt-name",
+            "summarize",
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "36"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["error"],
+        "Failed to get prompt 'summarize' from 'linear': prompt failed"
     );
 }
 

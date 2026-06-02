@@ -5,7 +5,8 @@ use by_mcp::{
     list_resources_request, list_tools_request, make_error_response, make_notification,
     make_request, make_response, mcp_input_schema_to_malli, normalize_tool_args, parse_sse_events,
     ping_request, project_disconnected_server_command_result, project_get_prompt_command_result,
-    project_lifecycle_command_result, project_read_resource_command_result,
+    project_get_prompt_error_command_result, project_lifecycle_command_result,
+    project_read_resource_command_result, project_read_resource_error_command_result,
     project_registered_tool_descriptors, project_registered_tools_command_result,
     project_server_capabilities_command_result, project_server_health_command_result,
     project_server_info_command_result, project_server_prompts_command_result,
@@ -638,6 +639,18 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     );
 
     assert_eq!(
+        project_read_resource_error_command_result(
+            "filesystem",
+            "file:///tmp/a.txt",
+            "resource failed"
+        )
+        .unwrap(),
+        json!({
+            "error": "Failed to read resource 'file:///tmp/a.txt' from 'filesystem': resource failed"
+        })
+    );
+
+    assert_eq!(
         project_get_prompt_command_result(
             "linear",
             "summarize",
@@ -657,6 +670,13 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
         })
     );
 
+    assert_eq!(
+        project_get_prompt_error_command_result("linear", "summarize", "prompt failed").unwrap(),
+        json!({
+            "error": "Failed to get prompt 'summarize' from 'linear': prompt failed"
+        })
+    );
+
     assert!(project_server_info_command_result("", json!({})).is_err());
     assert!(project_server_capabilities_command_result("", json!({})).is_err());
     assert!(project_server_health_command_result("", "healthy", 0).is_err());
@@ -669,7 +689,11 @@ fn mcp_resource_and_prompt_projections_match_clojure_command_shapes() {
     assert!(project_server_resources_command_result("", json!({})).is_err());
     assert!(project_server_prompts_command_result("", json!({})).is_err());
     assert!(project_read_resource_command_result("", "file:///tmp/a.txt", json!({})).is_err());
+    assert!(
+        project_read_resource_error_command_result("filesystem", "file:///tmp/a.txt", "").is_err()
+    );
     assert!(project_get_prompt_command_result("linear", "", json!({})).is_err());
+    assert!(project_get_prompt_error_command_result("linear", "", "prompt failed").is_err());
 }
 
 #[test]
