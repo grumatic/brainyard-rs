@@ -290,6 +290,24 @@ enum McpCommand {
         #[arg(long = "request-id", default_value_t = 1)]
         request_id: u64,
     },
+    /// Project a single tools/call request or response fixture.
+    CallTool {
+        /// MCP server name used by the agent command result.
+        #[arg(long = "server-name", value_name = "SERVER_NAME")]
+        server_name: String,
+        /// Native MCP tool name.
+        #[arg(long = "tool-name", value_name = "TOOL_NAME")]
+        tool_name: String,
+        /// Tool arguments as JSON. Accepts map, [{name,value}], or compact vector.
+        #[arg(long = "tool-args", default_value = "{}", value_name = "JSON")]
+        tool_args: String,
+        /// Optional tools/call JSON-RPC response or raw result fixture.
+        #[arg(long = "fixture-response", value_name = "PATH")]
+        fixture_response: Option<PathBuf>,
+        /// JSON-RPC request id.
+        #[arg(long = "request-id", default_value_t = 1)]
+        request_id: u64,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -455,6 +473,19 @@ fn run() -> Result<()> {
                 fixture_response,
                 request_id,
             } => print_mcp_registered_tools(server_name, fixture_response, request_id),
+            McpCommand::CallTool {
+                server_name,
+                tool_name,
+                tool_args,
+                fixture_response,
+                request_id,
+            } => print_mcp_call_tool(
+                server_name,
+                tool_name,
+                tool_args,
+                fixture_response,
+                request_id,
+            ),
         },
         Commands::Sessions { command } => match command {
             SessionCommand::List { root } => print_sessions(root),
@@ -1097,6 +1128,49 @@ fn print_mcp_registered_tools(
     let tools = by_mcp::tools_from_list_result(&server_name, &result)?;
     let output = by_mcp::project_registered_tools_command_result(&tools);
     println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn print_mcp_call_tool(
+    server_name: String,
+    tool_name: String,
+    tool_args: String,
+    fixture_response: Option<PathBuf>,
+    request_id: u64,
+) -> Result<()> {
+    let tool_args_json: serde_json::Value =
+        serde_json::from_str(&tool_args).context("failed to parse --tool-args JSON")?;
+    let calls = by_mcp::tool_calls_from_value(&serde_json::json!([
+        {
+            "server-name": server_name,
+            "tool-name": tool_name,
+            "tool-args": tool_args_json,
+        }
+    ]))?;
+    let call = calls
+        .first()
+        .context("single call projection should produce one call")?;
+
+    if let Some(fixture_response) = fixture_response {
+        let raw = std::fs::read_to_string(&fixture_response).with_context(|| {
+            format!(
+                "failed to read MCP tools/call response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let result = extract_mcp_fixture_result(&raw, request_id).with_context(|| {
+            format!(
+                "failed to project MCP tools/call response fixture {}",
+                fixture_response.display()
+            )
+        })?;
+        let output = by_mcp::project_tool_calls_command_result(&calls, &[result])?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        let output = by_mcp::tool_call_request_from_call(request_id, call)?;
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    }
+
     Ok(())
 }
 

@@ -625,6 +625,84 @@ fn mcp_registered_tools_hidden_command_projects_clojure_auto_registration_shape(
 }
 
 #[test]
+fn mcp_call_tool_hidden_command_projects_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "call-tool",
+            "--server-name",
+            "filesystem",
+            "--tool-name",
+            "read_file",
+            "--tool-args",
+            r#"[{"name":"path","value":"/tmp/a.txt"}]"#,
+            "--request-id",
+            "23",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["jsonrpc"], "2.0");
+    assert_eq!(value["id"], 23);
+    assert_eq!(value["method"], "tools/call");
+    assert_eq!(value["params"]["name"], "read_file");
+    assert_eq!(value["params"]["arguments"]["path"], "/tmp/a.txt");
+}
+
+#[test]
+fn mcp_call_tool_hidden_command_projects_response_fixture_to_command_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = dir.path().join("tools-call-response.json");
+    std::fs::write(
+        &fixture,
+        r#"{"jsonrpc":"2.0","id":24,"result":{"content":[{"type":"text","text":"ok"}]}}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "mcp",
+            "call-tool",
+            "--server-name",
+            "filesystem",
+            "--tool-name",
+            "read_file",
+            "--tool-args",
+            r#"{"path":"/tmp/a.txt"}"#,
+            "--fixture-response",
+        ])
+        .arg(&fixture)
+        .args(["--request-id", "24"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["result"]["total"], 1);
+    assert_eq!(
+        value["result"]["tool-results"][0]["server-name"],
+        "filesystem"
+    );
+    assert_eq!(value["result"]["tool-results"][0]["tool-name"], "read_file");
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-args"]["path"],
+        "/tmp/a.txt"
+    );
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["success"],
+        true
+    );
+    assert_eq!(
+        value["result"]["tool-results"][0]["tool-result"]["result"]["content"][0]["text"],
+        "ok"
+    );
+}
+
+#[test]
 fn config_help_matches_clojure_bootstrap_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()

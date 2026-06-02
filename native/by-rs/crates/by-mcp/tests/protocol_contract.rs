@@ -2,10 +2,11 @@ use by_mcp::{
     build_http_headers, call_tool_request, extract_jsonrpc_result_from_json,
     extract_jsonrpc_result_from_sse, get_prompt_request, http_initialize_request,
     initialized_notification, list_resources_request, list_tools_request, make_error_response,
-    make_notification, make_request, make_response, mcp_input_schema_to_malli, parse_sse_events,
-    project_registered_tool_descriptors, project_registered_tools_command_result,
-    project_tools_list_command_result, read_resource_request, registered_tool_id,
-    safe_clojure_symbol_name, stdio_initialize_request, tools_from_list_result,
+    make_notification, make_request, make_response, mcp_input_schema_to_malli, normalize_tool_args,
+    parse_sse_events, project_registered_tool_descriptors, project_registered_tools_command_result,
+    project_tool_calls_command_result, project_tools_list_command_result, read_resource_request,
+    registered_tool_id, safe_clojure_symbol_name, stdio_initialize_request,
+    tool_call_request_from_call, tool_calls_from_value, tools_from_list_result,
     validate_server_config, CLIENT_NAME, CLIENT_VERSION, JSON_RPC_VERSION, MCP_VERSION,
 };
 use by_registry::load_mcp_servers_path;
@@ -366,6 +367,83 @@ fn registered_tool_projection_matches_clojure_dynamic_tool_meta() {
     assert_eq!(
         project_registered_tools_command_result(&tools)["result"]["total"],
         2
+    );
+}
+
+#[test]
+fn mcp_tool_arg_normalization_matches_clojure_call_rules() {
+    assert_eq!(
+        normalize_tool_args(&json!({"path": "/tmp/a.txt", "limit": 2})),
+        json!({"path": "/tmp/a.txt", "limit": 2})
+    );
+    assert_eq!(
+        normalize_tool_args(&json!([
+            {"name": "path", "value": "/tmp/a.txt"},
+            {"name": "limit", "value": 2}
+        ])),
+        json!({"path": "/tmp/a.txt", "limit": 2})
+    );
+    assert_eq!(
+        normalize_tool_args(&json!([
+            {"path": "/tmp/a.txt"},
+            {"limit": 2}
+        ])),
+        json!({"path": "/tmp/a.txt", "limit": 2})
+    );
+    assert_eq!(normalize_tool_args(&json!("not-json-args")), json!({}));
+}
+
+#[test]
+fn mcp_tool_call_projection_matches_clojure_command_shape() {
+    let calls = tool_calls_from_value(&json!([
+        {
+            "server-name": "filesystem",
+            "tool-name": "read_file",
+            "tool-args": [
+                {"name": "path", "value": "/tmp/a.txt"}
+            ]
+        }
+    ]))
+    .unwrap();
+
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].server_name, "filesystem");
+    assert_eq!(calls[0].tool_name, "read_file");
+    assert_eq!(calls[0].arguments, json!({"path": "/tmp/a.txt"}));
+    assert_eq!(
+        tool_call_request_from_call(17, &calls[0]).unwrap(),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 17,
+            "method": "tools/call",
+            "params": {
+                "name": "read_file",
+                "arguments": {"path": "/tmp/a.txt"}
+            }
+        })
+    );
+    assert_eq!(
+        project_tool_calls_command_result(
+            &calls,
+            &[json!({"content": [{"type": "text", "text": "ok"}]})]
+        )
+        .unwrap(),
+        json!({
+            "result": {
+                "tool-results": [
+                    {
+                        "server-name": "filesystem",
+                        "tool-name": "read_file",
+                        "tool-args": [{"name": "path", "value": "/tmp/a.txt"}],
+                        "tool-result": {
+                            "success": true,
+                            "result": {"content": [{"type": "text", "text": "ok"}]}
+                        }
+                    }
+                ],
+                "total": 1
+            }
+        })
     );
 }
 

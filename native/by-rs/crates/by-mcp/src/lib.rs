@@ -41,6 +41,14 @@ pub struct McpTool {
     pub parameters: Value,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct McpToolCall {
+    pub server_name: String,
+    pub tool_name: String,
+    pub tool_args: Value,
+    pub arguments: Value,
+}
+
 pub fn make_request(id: u64, method: &str, params: Value) -> Result<Value> {
     ensure_method(method)?;
     ensure_object(&params, "params")?;
@@ -365,6 +373,88 @@ pub fn project_registered_tools_command_result(tools: &[McpTool]) -> Value {
     })
 }
 
+pub fn normalize_tool_args(tool_args: &Value) -> Value {
+    if let Some(object) = tool_args.as_object() {
+        return Value::Object(string_keyed_map(object));
+    }
+
+    let Some(entries) = tool_args.as_array() else {
+        return json!({});
+    };
+
+    let named_args = entries
+        .iter()
+        .filter_map(|entry| {
+            let object = entry.as_object()?;
+            let name = object.get("name").and_then(Value::as_str)?;
+            let value = object.get("value")?;
+            Some((name.to_string(), value.clone()))
+        })
+        .collect::<Map<_, _>>();
+
+    if !named_args.is_empty() {
+        return Value::Object(named_args);
+    }
+
+    let mut flattened = Map::new();
+    for entry in entries {
+        if let Some(object) = entry.as_object() {
+            flattened.extend(string_keyed_map(object));
+        }
+    }
+    Value::Object(flattened)
+}
+
+pub fn tool_calls_from_value(value: &Value) -> Result<Vec<McpToolCall>> {
+    let calls = value
+        .as_array()
+        .filter(|calls| !calls.is_empty())
+        .ok_or_else(|| anyhow!("tool-calls must be a non-empty array"))?;
+
+    calls.iter().map(tool_call_from_value).collect()
+}
+
+pub fn tool_call_request_from_call(request_id: u64, call: &McpToolCall) -> Result<Value> {
+    call_tool_request(request_id, &call.tool_name, call.arguments.clone())
+}
+
+pub fn project_tool_calls_command_result(
+    calls: &[McpToolCall],
+    tool_results: &[Value],
+) -> Result<Value> {
+    if calls.len() != tool_results.len() {
+        bail!(
+            "tool call count ({}) must match result count ({})",
+            calls.len(),
+            tool_results.len()
+        );
+    }
+
+    let results = calls
+        .iter()
+        .zip(tool_results)
+        .map(|(call, result)| {
+            json!({
+                "server-name": call.server_name,
+                "tool-name": call.tool_name,
+                "tool-args": call.tool_args,
+                "tool-result": {
+                    "success": true,
+                    "result": result,
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    let total = results.len();
+
+    Ok(json!({
+        "result": {
+            "tool-results": results,
+            "total": total,
+        }
+    }))
+}
+
 pub fn registered_tool_id(server_name: &str, tool_name: &str) -> Result<String> {
     ensure_nonblank(server_name, "server_name")?;
     ensure_nonblank(tool_name, "tool_name")?;
@@ -442,6 +532,42 @@ fn tool_from_list_value(server_name: &str, value: &Value) -> Result<McpTool> {
         description,
         parameters,
     })
+}
+
+fn tool_call_from_value(value: &Value) -> Result<McpToolCall> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("MCP tool call must be an object"))?;
+    let server_name = object_string_any(object, &["server-name", "server_name", "serverName"])
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("MCP tool call requires server-name"))?;
+    let tool_name = object_string_any(object, &["tool-name", "tool_name", "toolName"])
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("MCP tool call requires tool-name"))?;
+    let tool_args = object
+        .get("tool-args")
+        .or_else(|| object.get("tool_args"))
+        .or_else(|| object.get("toolArgs"))
+        .or_else(|| object.get("parameters"))
+        .or_else(|| object.get("args"))
+        .or_else(|| object.get("arguments"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let arguments = normalize_tool_args(&tool_args);
+
+    Ok(McpToolCall {
+        server_name: server_name.to_string(),
+        tool_name: tool_name.to_string(),
+        tool_args,
+        arguments,
+    })
+}
+
+fn string_keyed_map(object: &Map<String, Value>) -> Map<String, Value> {
+    object
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.clone()))
+        .collect()
 }
 
 fn json_schema_to_malli(spec: &Value, optional: bool) -> Value {
@@ -538,6 +664,11 @@ fn attach_malli_meta(schema: Value, meta: Map<String, Value>) -> Value {
 
 fn object_field<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     value.as_object()?.get(key)
+}
+
+fn object_string_any<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_str))
 }
 
 fn required_field_names(value: &Value) -> BTreeSet<String> {
