@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use anyhow::{Context, Result};
-use by_contracts::{parse_map, EdnMap, EdnValue};
+use by_contracts::{parse_map, parse_value, EdnMap, EdnValue};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::{BufRead, ErrorKind, Write};
@@ -50,6 +50,48 @@ pub struct SessionMetaUpdate {
     pub started_at_millis: Option<i64>,
     pub last_attached_at_millis: Option<i64>,
     pub working_dir: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionSnapshotKind {
+    Meta,
+    Session,
+    Layout,
+    PendingDialogs,
+    Permissions,
+    Queue,
+    Todo,
+    Status,
+    InputHistory,
+    UsageTracker,
+}
+
+impl SessionSnapshotKind {
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Self::Meta => "meta.edn",
+            Self::Session => "session.edn",
+            Self::Layout => "layout.edn",
+            Self::PendingDialogs => "pending-dialogs.edn",
+            Self::Permissions => "permissions.edn",
+            Self::Queue => "queue.edn",
+            Self::Todo => "todo.edn",
+            Self::Status => "status.edn",
+            Self::InputHistory => "input-history.edn",
+            Self::UsageTracker => "usage-tracker.edn",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RestoredSession {
+    pub id: String,
+    pub user_id: Option<String>,
+    pub agent: Option<String>,
+    pub total_turns: Option<i64>,
+    pub agent_activity_seq: Option<i64>,
+    pub messages: Vec<SessionMessage>,
+    pub usage_tracker: Option<EdnValue>,
 }
 
 pub fn list_sessions(root: impl AsRef<Path>) -> Result<Vec<SessionSummary>> {
@@ -252,6 +294,117 @@ pub fn read_session_messages(
     Ok(messages)
 }
 
+pub fn read_session_snapshot(
+    root: impl AsRef<Path>,
+    session_id: &str,
+    kind: SessionSnapshotKind,
+) -> Result<Option<EdnValue>> {
+    let root = root.as_ref();
+    let Some(target_name) = safe_session_dir_name(session_id) else {
+        anyhow::bail!("invalid session id for snapshot read: {session_id}");
+    };
+    let snapshot_path = root.join(target_name).join(kind.file_name());
+    let raw = match std::fs::read_to_string(&snapshot_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "failed to read session snapshot {}",
+                    snapshot_path.display()
+                )
+            });
+        }
+    };
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+
+    parse_value(&raw)
+        .with_context(|| {
+            format!(
+                "failed to parse session snapshot {}",
+                snapshot_path.display()
+            )
+        })
+        .map(Some)
+}
+
+pub fn write_session_snapshot(
+    root: impl AsRef<Path>,
+    session_id: &str,
+    kind: SessionSnapshotKind,
+    value: &EdnValue,
+) -> Result<PathBuf> {
+    let root = root.as_ref();
+    let Some(target_name) = safe_session_dir_name(session_id) else {
+        anyhow::bail!("invalid session id for snapshot write: {session_id}");
+    };
+    let target = root.join(target_name);
+    std::fs::create_dir_all(&target)
+        .with_context(|| format!("failed to create session path {}", target.display()))?;
+
+    let snapshot_path = target.join(kind.file_name());
+    let temp_path = snapshot_path.with_extension(format!("edn.tmp-{}", std::process::id()));
+    std::fs::write(&temp_path, format!("{}\n", format_edn_value(value)))
+        .with_context(|| format!("failed to write session snapshot {}", temp_path.display()))?;
+    std::fs::rename(&temp_path, &snapshot_path).with_context(|| {
+        format!(
+            "failed to replace session snapshot {} from {}",
+            snapshot_path.display(),
+            temp_path.display()
+        )
+    })?;
+
+    Ok(snapshot_path)
+}
+
+pub fn restore_session(root: impl AsRef<Path>, session_id: &str) -> Result<RestoredSession> {
+    let root = root.as_ref();
+    let Some(target_name) = safe_session_dir_name(session_id) else {
+        anyhow::bail!("invalid session id for restore: {session_id}");
+    };
+    let session_dir = root.join(target_name);
+    if !session_dir.is_dir() {
+        anyhow::bail!("session path does not exist: {}", session_dir.display());
+    }
+
+    let meta = EdnMap::new(read_meta_entries(
+        &session_dir.join(SessionSnapshotKind::Meta.file_name()),
+    )?);
+    let session_snapshot = read_session_snapshot(root, target_name, SessionSnapshotKind::Session)?;
+    let session_map = match session_snapshot {
+        Some(EdnValue::Map(map)) => Some(map),
+        Some(_) => {
+            anyhow::bail!(
+                "session snapshot {} must be an EDN map",
+                session_dir
+                    .join(SessionSnapshotKind::Session.file_name())
+                    .display()
+            );
+        }
+        None => None,
+    };
+    let usage_tracker =
+        read_session_snapshot(root, target_name, SessionSnapshotKind::UsageTracker)?;
+    let messages = read_session_messages(root, target_name)?;
+    let session_ref = session_map.as_ref();
+
+    Ok(RestoredSession {
+        id: target_name.to_string(),
+        user_id: session_ref
+            .and_then(|session| text_value(session.get("user-id")))
+            .or_else(|| text_value(meta.get("user-id"))),
+        agent: session_ref
+            .and_then(agent_from_map)
+            .or_else(|| agent_from_map(&meta)),
+        total_turns: session_ref.and_then(|session| session.i64("total-turns")),
+        agent_activity_seq: session_ref.and_then(|session| session.i64("agent-activity-seq")),
+        messages,
+        usage_tracker,
+    })
+}
+
 fn load_session_summary(
     dir_id: String,
     path: PathBuf,
@@ -304,7 +457,7 @@ fn summary_from_meta(dir_id: String, path: PathBuf, meta: &EdnMap) -> SessionSum
     SessionSummary {
         id: dir_id,
         label: meta.string("label").map(ToOwned::to_owned),
-        agent: text_value(meta.get("defagent-id")).or_else(|| text_value(meta.get("agent-id"))),
+        agent: agent_from_map(meta),
         bytes: dir_size(&path).unwrap_or(0),
         created_at: meta.instant("created-at").map(ToOwned::to_owned),
         started_at: meta
@@ -316,6 +469,10 @@ fn summary_from_meta(dir_id: String, path: PathBuf, meta: &EdnMap) -> SessionSum
         last_attached_at_millis: meta.i64("last-attached-at"),
         path,
     }
+}
+
+fn agent_from_map(map: &EdnMap) -> Option<String> {
+    text_value(map.get("defagent-id")).or_else(|| text_value(map.get("agent-id")))
 }
 
 fn text_value(value: Option<&EdnValue>) -> Option<String> {
@@ -421,6 +578,7 @@ fn format_edn_value(value: &EdnValue) -> String {
         EdnValue::Nil => "nil".to_string(),
         EdnValue::Bool(value) => value.to_string(),
         EdnValue::Integer(value) => value.to_string(),
+        EdnValue::Float(value) => format_edn_float(*value),
         EdnValue::String(value) => format!("\"{}\"", escape_edn_string(value)),
         EdnValue::Keyword(value) => format!(":{value}"),
         EdnValue::Symbol(value) => value.clone(),
@@ -441,6 +599,15 @@ fn format_edn_value(value: &EdnValue) -> String {
                 .join(" ");
             format!("{{{values}}}")
         }
+    }
+}
+
+fn format_edn_float(value: f64) -> String {
+    let raw = value.to_string();
+    if raw.contains('.') || raw.contains('e') || raw.contains('E') {
+        raw
+    } else {
+        format!("{raw}.0")
     }
 }
 

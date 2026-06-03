@@ -344,6 +344,38 @@ fn run_explicit_resume_uses_session_dir_when_meta_id_is_stale() {
 }
 
 #[test]
+fn run_explicit_resume_preview_reports_persisted_message_count() {
+    let home = tempfile::tempdir().unwrap();
+    write_session_meta(
+        home.path(),
+        "alpha",
+        r#"{:agent-id :coact-agent
+            :defagent-id :coact-agent
+            :started-at 1000
+            :last-attached-at 1000}"#,
+    );
+    std::fs::write(
+        home.path()
+            .join(".brainyard/sessions/alpha")
+            .join("messages.log"),
+        r#"{:t 1 :kind :message :payload {:role "user" :content "Hello"}}
+{:t 2 :kind :message :payload {:role "assistant" :content "Hi"}}
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "ignored-for-resume")
+        .args(["run", "--resume", "alpha"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("resume alpha · 2 messages"))
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn run_select_resume_without_sessions_reaches_preview_tui_without_prompt() {
     let home = tempfile::tempdir().unwrap();
 
@@ -651,6 +683,62 @@ fn run_bedrock_fixture_one_turn_persists_restore_compatible_messages() {
     assert!(lines[1].contains(r#":kind :message"#));
     assert!(lines[1].contains(r#":role "assistant""#));
     assert!(lines[1].contains(r#":content "Hello world""#));
+}
+
+#[test]
+fn run_bedrock_fixture_resume_appends_new_exchange_after_existing_history() {
+    let home = tempfile::tempdir().unwrap();
+    let session_id = "agt-run-fixture-resume";
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/bedrock/converse-response.json");
+    write_session_meta(
+        home.path(),
+        session_id,
+        r#"{:agent-id :coact-agent
+            :defagent-id :coact-agent
+            :started-at 1000
+            :last-attached-at 1000}"#,
+    );
+    let session_dir = home.path().join(".brainyard/sessions").join(session_id);
+    let original_messages = r#"{:t 1 :kind :message :payload {:role "user" :content "First turn"}}
+{:t 2 :kind :message :payload {:role "assistant" :content "Intermediate answer"}}
+"#;
+    std::fs::write(session_dir.join("messages.log"), original_messages).unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .args([
+            "run",
+            "--resume",
+            session_id,
+            "--provider",
+            "bedrock",
+            "--model",
+            "amazon.nova-lite-v1:0",
+            "--fixture-response",
+        ])
+        .arg(fixture)
+        .arg("Second turn")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello world"))
+        .stderr(predicate::str::is_empty());
+
+    let messages = read_session_messages(home.path(), session_id);
+    let lines = messages.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 4);
+    assert!(lines[0].contains(r#":content "First turn""#));
+    assert!(lines[1].contains(r#":content "Intermediate answer""#));
+    assert!(lines[2].contains(r#":role "user""#));
+    assert!(lines[2].contains(r#":content "Second turn""#));
+    assert!(lines[3].contains(r#":role "assistant""#));
+    assert!(lines[3].contains(r#":content "Hello world""#));
+
+    let meta = read_session_meta(home.path(), session_id);
+    assert!(meta.contains(":started-at 1000"));
+    assert!(!meta.contains(":last-attached-at 1000"));
 }
 
 #[test]

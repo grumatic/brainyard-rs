@@ -8,6 +8,7 @@ pub enum EdnValue {
     Nil,
     Bool(bool),
     Integer(i64),
+    Float(f64),
     String(String),
     Keyword(String),
     Symbol(String),
@@ -60,7 +61,7 @@ impl EdnMap {
     }
 }
 
-pub fn parse_map(input: &str) -> Result<EdnMap> {
+pub fn parse_value(input: &str) -> Result<EdnValue> {
     let mut parser = Parser::new(input);
     let value = parser.parse_value()?;
     parser.skip_ws_and_comments();
@@ -70,7 +71,11 @@ pub fn parse_map(input: &str) -> Result<EdnMap> {
             parser.position()
         );
     }
-    match value {
+    Ok(value)
+}
+
+pub fn parse_map(input: &str) -> Result<EdnMap> {
+    match parse_value(input)? {
         EdnValue::Map(map) => Ok(map),
         _ => bail!("expected EDN map root"),
     }
@@ -198,7 +203,17 @@ impl<'a> Parser<'a> {
             "false" => Ok(EdnValue::Bool(false)),
             _ => match token.parse::<i64>() {
                 Ok(value) => Ok(EdnValue::Integer(value)),
-                Err(_) => Ok(EdnValue::Symbol(token)),
+                Err(_) => match token.parse::<f64>() {
+                    Ok(value)
+                        if value.is_finite()
+                            && (token.contains('.')
+                                || token.contains('e')
+                                || token.contains('E')) =>
+                    {
+                        Ok(EdnValue::Float(value))
+                    }
+                    _ => Ok(EdnValue::Symbol(token)),
+                },
             },
         }
     }

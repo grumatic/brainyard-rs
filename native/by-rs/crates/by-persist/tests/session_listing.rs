@@ -1,8 +1,10 @@
-use by_contracts::parse_map;
+use by_contracts::{parse_map, EdnMap, EdnValue};
 use by_persist::{
     append_session_message, delete_session_dir, list_sessions, list_sessions_with_warnings,
-    read_session_messages, save_session_meta, SessionMessage, SessionMetaUpdate,
+    read_session_messages, read_session_snapshot, restore_session, save_session_meta,
+    write_session_snapshot, SessionMessage, SessionMetaUpdate, SessionSnapshotKind,
 };
+use std::collections::BTreeMap;
 
 #[test]
 fn lists_session_dirs_with_optional_meta_edn() {
@@ -243,6 +245,152 @@ fn read_session_messages_rejects_path_traversal() {
     let err = read_session_messages(root.path(), "../outside").expect_err("invalid id should fail");
 
     assert!(err.to_string().contains("invalid session id"));
+}
+
+#[test]
+fn reads_and_writes_edn_snapshots_with_non_map_roots() {
+    let root = tempfile::tempdir().expect("temp root");
+    let pending_dialogs = EdnValue::Vector(vec![
+        EdnValue::Keyword("tool-approval".to_string()),
+        EdnValue::Map(parse_map(r#"{:id "dlg-1"}"#).unwrap()),
+    ]);
+
+    let path = write_session_snapshot(
+        root.path(),
+        "agt-test",
+        SessionSnapshotKind::PendingDialogs,
+        &pending_dialogs,
+    )
+    .expect("snapshot write should succeed");
+
+    assert!(path.ends_with("pending-dialogs.edn"));
+    assert_eq!(
+        read_session_snapshot(root.path(), "agt-test", SessionSnapshotKind::PendingDialogs)
+            .expect("snapshot read should succeed"),
+        Some(pending_dialogs)
+    );
+
+    let mut totals = BTreeMap::new();
+    totals.insert("total-cost".to_string(), EdnValue::Float(0.0));
+    let usage = EdnValue::Map(EdnMap::new(totals));
+    write_session_snapshot(
+        root.path(),
+        "agt-test",
+        SessionSnapshotKind::UsageTracker,
+        &usage,
+    )
+    .expect("usage snapshot write should succeed");
+
+    let raw = std::fs::read_to_string(root.path().join("agt-test/usage-tracker.edn")).unwrap();
+    assert!(raw.contains(":total-cost 0.0"));
+    assert_eq!(
+        read_session_snapshot(root.path(), "agt-test", SessionSnapshotKind::UsageTracker)
+            .expect("usage snapshot should parse"),
+        Some(usage)
+    );
+}
+
+#[test]
+fn read_session_snapshot_missing_file_is_none() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let value = read_session_snapshot(root.path(), "agt-missing", SessionSnapshotKind::Session)
+        .expect("missing snapshot should not fail");
+
+    assert_eq!(value, None);
+}
+
+#[test]
+fn session_snapshot_io_rejects_path_traversal() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let read_err = read_session_snapshot(root.path(), "../outside", SessionSnapshotKind::Session)
+        .expect_err("invalid id should fail");
+    assert!(read_err.to_string().contains("invalid session id"));
+
+    let write_err = write_session_snapshot(
+        root.path(),
+        "../outside",
+        SessionSnapshotKind::Session,
+        &EdnValue::Map(EdnMap::default()),
+    )
+    .expect_err("invalid id should fail");
+    assert!(write_err.to_string().contains("invalid session id"));
+}
+
+#[test]
+fn restore_session_combines_session_snapshot_meta_messages_and_usage() {
+    let root = tempfile::tempdir().expect("temp root");
+    let session_dir = root.path().join("real-id");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(
+        session_dir.join("meta.edn"),
+        r#"{:id "stale-meta-id"
+            :user-id "alice"
+            :defagent-id :meta-agent}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        session_dir.join("session.edn"),
+        r#"{:id "stale-session-id"
+            :user-id "bob"
+            :agent-id :session-agent
+            :total-turns 2
+            :agent-activity-seq 9}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        session_dir.join("messages.log"),
+        r#"{:t 1 :kind :agent.ask/pre :payload {:input "ignored"}}
+{:t 2 :kind :message :payload {:role "user" :content "First turn"}}
+{:t 3 :kind :message :payload {:role "assistant" :content "Answer"}}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        session_dir.join("usage-tracker.edn"),
+        r#"{:totals {:total-cost 0.0 :call-count 1} :history []}"#,
+    )
+    .unwrap();
+
+    let restored = restore_session(root.path(), "real-id").expect("session should restore");
+
+    assert_eq!(restored.id, "real-id");
+    assert_eq!(restored.user_id.as_deref(), Some("bob"));
+    assert_eq!(restored.agent.as_deref(), Some("session-agent"));
+    assert_eq!(restored.total_turns, Some(2));
+    assert_eq!(restored.agent_activity_seq, Some(9));
+    assert_eq!(
+        restored.messages,
+        vec![
+            SessionMessage {
+                role: "user".to_string(),
+                content: "First turn".to_string(),
+            },
+            SessionMessage {
+                role: "assistant".to_string(),
+                content: "Answer".to_string(),
+            },
+        ]
+    );
+    assert_eq!(
+        restored.usage_tracker,
+        Some(EdnValue::Map(
+            parse_map(r#"{:totals {:total-cost 0.0 :call-count 1} :history []}"#).unwrap()
+        ))
+    );
+}
+
+#[test]
+fn restore_session_rejects_non_map_session_snapshot() {
+    let root = tempfile::tempdir().expect("temp root");
+    let session_dir = root.path().join("broken");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(session_dir.join("session.edn"), r#"[:not-a-map]"#).unwrap();
+
+    let err = restore_session(root.path(), "broken").expect_err("session.edn must be a map");
+
+    assert!(err.to_string().contains("must be an EDN map"));
 }
 
 #[test]

@@ -3157,7 +3157,7 @@ fn print_run_preview(
         cols: RUN_PREVIEW_COLS,
         agent,
         model: run_preview_model_label(&provider, model),
-        status: run_preview_status(selection),
+        status: run_preview_status(selection)?,
     };
     println!("{}", by_tui::render_static_frame(&frame));
     Ok(())
@@ -3170,12 +3170,18 @@ fn run_preview_model_label(provider: &str, model: Option<&str>) -> String {
     }
 }
 
-fn run_preview_status(selection: &RunSessionSelection) -> String {
+fn run_preview_status(selection: &RunSessionSelection) -> Result<String> {
     if selection.resume {
         let session_id = selection.session_id.as_deref().unwrap_or("latest");
-        format!("resume {session_id}")
+        let root = default_sessions_root().context("could not determine default session root")?;
+        let message_count = by_persist::read_session_messages(root, session_id)?.len();
+        if message_count == 0 {
+            Ok(format!("resume {session_id}"))
+        } else {
+            Ok(format!("resume {session_id} · {message_count} messages"))
+        }
     } else {
-        "preview".to_string()
+        Ok("preview".to_string())
     }
 }
 
