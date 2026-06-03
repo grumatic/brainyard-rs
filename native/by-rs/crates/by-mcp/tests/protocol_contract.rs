@@ -1,10 +1,11 @@
 use by_mcp::{
     build_http_headers, call_tool_request, extract_jsonrpc_error_message_from_json,
-    extract_jsonrpc_result_from_json, extract_jsonrpc_result_from_sse, get_prompt_request,
-    http_initialize_request, initialized_notification, list_prompts_request,
-    list_resources_request, list_tools_request, make_error_response, make_notification,
-    make_request, make_response, mcp_input_schema_to_malli, normalize_tool_args, parse_sse_events,
-    ping_request, project_disconnected_server_command_result, project_error_command_result,
+    extract_jsonrpc_error_message_from_sse, extract_jsonrpc_result_from_json,
+    extract_jsonrpc_result_from_sse, get_prompt_request, http_initialize_request,
+    initialized_notification, list_prompts_request, list_resources_request, list_tools_request,
+    make_error_response, make_notification, make_request, make_response, mcp_input_schema_to_malli,
+    normalize_tool_args, parse_sse_events, ping_request,
+    project_disconnected_server_command_result, project_error_command_result,
     project_get_prompt_command_result, project_get_prompt_error_command_result,
     project_lifecycle_command_result, project_read_resource_command_result,
     project_read_resource_error_command_result, project_registered_tool_descriptors,
@@ -201,6 +202,35 @@ data: {"jsonrpc":"2.0","id":42,"result":{"tools":[{"name":"search"}]}}
 
     let result = extract_jsonrpc_result_from_sse(body, 42).unwrap();
     assert_eq!(result, json!({"tools": [{"name": "search"}]}));
+}
+
+#[test]
+fn sse_error_extraction_skips_notifications_and_projects_matching_error_message() {
+    let body = r#": keepalive
+event: message
+data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{}}
+
+event: message
+data: {"jsonrpc":"2.0","id":41,"error":{"code":-32000,"message":"wrong id"}}
+
+event: message
+data: {"jsonrpc":"2.0","id":42,"error":{"code":-32000,"message":"tools failed"}}
+"#;
+
+    assert_eq!(
+        extract_jsonrpc_error_message_from_sse(body, 42).unwrap(),
+        Some("tools failed".to_string())
+    );
+    assert_eq!(
+        extract_jsonrpc_error_message_from_sse(
+            r#"event: message
+data: {"jsonrpc":"2.0","id":42,"result":{}}
+"#,
+            42
+        )
+        .unwrap(),
+        None
+    );
 }
 
 #[test]

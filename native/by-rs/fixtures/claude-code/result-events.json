@@ -1,0 +1,24 @@
+[
+  {
+    "type": "assistant",
+    "message": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Intermediate Claude Code text"
+        }
+      ]
+    }
+  },
+  {
+    "type": "result",
+    "subtype": "success",
+    "result": "Hello from Claude Code fixture",
+    "usage": {
+      "input_tokens": 17,
+      "output_tokens": 4,
+      "cache_read_input_tokens": 1,
+      "cache_creation_input_tokens": 2
+    }
+  }
+]

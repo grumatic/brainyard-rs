@@ -43,6 +43,65 @@ fn parses_general_edn_roots_for_snapshot_files() {
 }
 
 #[test]
+fn parses_common_clojure_snapshot_forms() {
+    let value = parse_value(
+        r#"{:id #uuid "123e4567-e89b-12d3-a456-426614174000"
+             :modes #{:ask :run}
+             :queued (:tool "call")
+             :kept #_ "discard me" "value"}"#,
+    )
+    .expect("snapshot parser should accept common Clojure EDN forms");
+
+    assert_eq!(
+        value,
+        EdnValue::Map(
+            parse_map(
+                r#"{:id #uuid "123e4567-e89b-12d3-a456-426614174000"
+                :modes #{:ask :run}
+                :queued (:tool "call")
+                :kept "value"}"#
+            )
+            .unwrap()
+        )
+    );
+}
+
+#[test]
+fn parses_uuid_set_list_and_reader_discard_roots() {
+    assert_eq!(
+        parse_value(r#"#uuid "123e4567-e89b-12d3-a456-426614174000""#).unwrap(),
+        EdnValue::Uuid("123e4567-e89b-12d3-a456-426614174000".to_string())
+    );
+    assert_eq!(
+        parse_value(r#"#{:alpha "beta" 3}"#).unwrap(),
+        EdnValue::Set(vec![
+            EdnValue::Keyword("alpha".to_string()),
+            EdnValue::String("beta".to_string()),
+            EdnValue::Integer(3),
+        ])
+    );
+    assert_eq!(
+        parse_value(r#"(:call {:id "1"})"#).unwrap(),
+        EdnValue::List(vec![
+            EdnValue::Keyword("call".to_string()),
+            EdnValue::Map(parse_map(r#"{:id "1"}"#).unwrap()),
+        ])
+    );
+    assert_eq!(
+        parse_value(r#"#_ {:debug true} [:kept]"#).unwrap(),
+        EdnValue::Vector(vec![EdnValue::Keyword("kept".to_string())])
+    );
+}
+
+#[test]
+fn parses_mulog_flake_reader_tag_as_the_underlying_value() {
+    assert_eq!(
+        parse_value(r#"#mulog/flake "01HWTESTTRACE""#).unwrap(),
+        EdnValue::String("01HWTESTTRACE".to_string())
+    );
+}
+
+#[test]
 fn parse_map_still_rejects_vector_roots() {
     let err = parse_map(r#"[:pending]"#).expect_err("map callers should keep map-only contract");
 

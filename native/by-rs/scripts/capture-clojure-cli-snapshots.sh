@@ -176,6 +176,24 @@ json_escape() {
   python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
 }
 
+
+snapshot_timeout_seconds="${BY_CLI_SNAPSHOT_TIMEOUT_SECONDS:-60}"
+
+terminate_tree() {
+  local pid="$1"
+  local signal="${2:-TERM}"
+  local child=""
+
+  if command -v pgrep >/dev/null 2>&1; then
+    while IFS= read -r child; do
+      [[ -n "$child" ]] || continue
+      terminate_tree "$child" "$signal"
+    done < <(pgrep -P "$pid" 2>/dev/null || true)
+  fi
+
+  kill -"$signal" "$pid" 2>/dev/null || true
+}
+
 capture_case() {
   local name="$1"
   shift
@@ -196,6 +214,11 @@ capture_case() {
     printf 'N\n' >"$stdin_file"
   fi
 
+  local timeout_file="$fixture_home/$name.timeout"
+  local command_pid=""
+  local timeout_pid=""
+  rm -f "$timeout_file"
+
   if [[ -n "$runner_command" ]]; then
     command="$runner_command"
     for arg in "$@"; do
@@ -210,7 +233,7 @@ capture_case() {
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
         bash -lc "$env_prefix$command" <"$stdin_file"
-    ) >"$stdout_file" 2>"$stderr_file" || status=$?
+    ) >"$stdout_file" 2>"$stderr_file" &
   else
     (
       cd "$repo_root"
@@ -220,7 +243,35 @@ capture_case() {
       BRAINYARD_PROJECT_DIR="$project_dir" \
       NO_COLOR=1 \
         "$bin_path" "$@" <"$stdin_file"
-    ) >"$stdout_file" 2>"$stderr_file" || status=$?
+    ) >"$stdout_file" 2>"$stderr_file" &
+  fi
+
+  command_pid="$!"
+  (
+    elapsed=0
+    while [[ "$elapsed" -lt "$snapshot_timeout_seconds" ]]; do
+      sleep 1
+      if ! kill -0 "$command_pid" 2>/dev/null; then
+        exit 0
+      fi
+      elapsed=$((elapsed + 1))
+    done
+    if kill -0 "$command_pid" 2>/dev/null; then
+      printf 'snapshot command timed out after %s seconds\n' "$snapshot_timeout_seconds" >"$timeout_file"
+      terminate_tree "$command_pid" TERM
+      sleep 1
+      terminate_tree "$command_pid" KILL
+    fi
+  ) &
+  timeout_pid="$!"
+
+  wait "$command_pid" || status=$?
+  kill "$timeout_pid" 2>/dev/null || true
+  wait "$timeout_pid" 2>/dev/null || true
+  if [[ -f "$timeout_file" ]]; then
+    cat "$timeout_file" >>"$stderr_file"
+    rm -f "$timeout_file"
+    status=124
   fi
   if [[ "$name" == "run_select_resume_with_tmux_need_session" ]]; then
     clear_select_resume_fixture

@@ -1,8 +1,9 @@
 use by_contracts::{parse_map, EdnMap, EdnValue};
 use by_persist::{
     append_session_message, delete_session_dir, list_sessions, list_sessions_with_warnings,
-    read_session_messages, read_session_snapshot, restore_session, save_session_meta,
-    write_session_snapshot, SessionMessage, SessionMetaUpdate, SessionSnapshotKind,
+    read_session_messages, read_session_snapshot, release_session_lock, restore_session,
+    save_session_meta, try_acquire_session_lock, write_session_snapshot, SessionMessage,
+    SessionMetaUpdate, SessionSnapshotKind,
 };
 use std::collections::BTreeMap;
 
@@ -253,6 +254,14 @@ fn reads_and_writes_edn_snapshots_with_non_map_roots() {
     let pending_dialogs = EdnValue::Vector(vec![
         EdnValue::Keyword("tool-approval".to_string()),
         EdnValue::Map(parse_map(r#"{:id "dlg-1"}"#).unwrap()),
+        EdnValue::Set(vec![
+            EdnValue::Keyword("ask".to_string()),
+            EdnValue::Keyword("run".to_string()),
+        ]),
+        EdnValue::List(vec![
+            EdnValue::Symbol("quote".to_string()),
+            EdnValue::Uuid("123e4567-e89b-12d3-a456-426614174000".to_string()),
+        ]),
     ]);
 
     let path = write_session_snapshot(
@@ -269,6 +278,9 @@ fn reads_and_writes_edn_snapshots_with_non_map_roots() {
             .expect("snapshot read should succeed"),
         Some(pending_dialogs)
     );
+    let raw = std::fs::read_to_string(root.path().join("agt-test/pending-dialogs.edn")).unwrap();
+    assert!(raw.contains("#{:ask :run}"));
+    assert!(raw.contains(r#"(quote #uuid "123e4567-e89b-12d3-a456-426614174000")"#));
 
     let mut totals = BTreeMap::new();
     totals.insert("total-cost".to_string(), EdnValue::Float(0.0));
@@ -287,6 +299,34 @@ fn reads_and_writes_edn_snapshots_with_non_map_roots() {
         read_session_snapshot(root.path(), "agt-test", SessionSnapshotKind::UsageTracker)
             .expect("usage snapshot should parse"),
         Some(usage)
+    );
+}
+
+#[test]
+fn writes_edn_maps_with_string_keys_for_usage_model_ids() {
+    let root = tempfile::tempdir().expect("temp root");
+    let usage = EdnValue::MapEntries(vec![(
+        EdnValue::Keyword("by-model".to_string()),
+        EdnValue::MapEntries(vec![(
+            EdnValue::String("amazon.nova-lite-v1:0".to_string()),
+            EdnValue::Map(parse_map(r#"{:call-count 1}"#).unwrap()),
+        )]),
+    )]);
+
+    write_session_snapshot(
+        root.path(),
+        "agt-test",
+        SessionSnapshotKind::UsageTracker,
+        &usage,
+    )
+    .expect("usage snapshot write should succeed");
+
+    let raw = std::fs::read_to_string(root.path().join("agt-test/usage-tracker.edn")).unwrap();
+    assert!(raw.contains(r#":by-model {"amazon.nova-lite-v1:0" {:call-count 1}}"#));
+    assert!(
+        read_session_snapshot(root.path(), "agt-test", SessionSnapshotKind::UsageTracker)
+            .expect("usage snapshot should parse")
+            .is_some()
     );
 }
 
@@ -410,6 +450,66 @@ fn delete_session_dir_rejects_path_traversal() {
     let root = tempfile::tempdir().expect("temp root");
 
     let err = delete_session_dir(root.path(), "../outside").expect_err("invalid id should fail");
+
+    assert!(err.to_string().contains("invalid session id"));
+}
+
+#[test]
+fn session_lock_blocks_second_acquire_and_releases_file() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let first = try_acquire_session_lock(root.path(), "agt-locked")
+        .expect("lock acquire should not fail")
+        .expect("first lock should acquire");
+    assert_eq!(first.pid(), std::process::id());
+    assert_eq!(first.path().file_name().unwrap(), "by-host.lock");
+    assert_eq!(
+        std::fs::read_to_string(first.path()).unwrap(),
+        format!("{}\n", std::process::id())
+    );
+
+    let second =
+        try_acquire_session_lock(root.path(), "agt-locked").expect("second acquire should read");
+    assert!(
+        second.is_none(),
+        "same process lock should not be reentrant"
+    );
+
+    let lock_path = first.path().to_path_buf();
+    release_session_lock(first).expect("release should remove lock");
+    assert!(!lock_path.exists());
+
+    let reacquired = try_acquire_session_lock(root.path(), "agt-locked")
+        .expect("reacquire should not fail")
+        .expect("released lock should reacquire");
+    release_session_lock(reacquired).expect("cleanup should release");
+}
+
+#[test]
+fn session_lock_replaces_invalid_stale_lock() {
+    let root = tempfile::tempdir().expect("temp root");
+    let session_dir = root.path().join("agt-stale");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    let lock_path = session_dir.join("by-host.lock");
+    std::fs::write(&lock_path, "not-a-pid\n").unwrap();
+
+    let lock = try_acquire_session_lock(root.path(), "agt-stale")
+        .expect("stale lock acquire should not fail")
+        .expect("invalid stale lock should be replaced");
+
+    assert_eq!(
+        std::fs::read_to_string(&lock_path).unwrap(),
+        format!("{}\n", std::process::id())
+    );
+    release_session_lock(lock).expect("cleanup should release");
+}
+
+#[test]
+fn session_lock_rejects_path_traversal() {
+    let root = tempfile::tempdir().expect("temp root");
+
+    let err =
+        try_acquire_session_lock(root.path(), "../outside").expect_err("invalid id should fail");
 
     assert!(err.to_string().contains("invalid session id"));
 }

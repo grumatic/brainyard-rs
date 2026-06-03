@@ -1,6 +1,6 @@
 use by_llm::{
-    projected_response_text, reshape_anthropic_response, reshape_openai_compatible_response,
-    reshape_provider_response,
+    projected_response_text, reshape_acp_response, reshape_anthropic_response,
+    reshape_claude_code_response, reshape_openai_compatible_response, reshape_provider_response,
 };
 use serde_json::json;
 
@@ -106,6 +106,84 @@ fn anthropic_response_projects_to_common_text_shape() {
 }
 
 #[test]
+fn claude_code_response_projects_result_event_to_common_text_shape() {
+    let projected = reshape_claude_code_response(json!([
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": "intermediate text"}]
+            }
+        },
+        {
+            "type": "result",
+            "subtype": "success",
+            "result": "Hello from Claude Code",
+            "usage": {
+                "input_tokens": 17,
+                "output_tokens": 4,
+                "cache_read_input_tokens": 1,
+                "cache_creation_input_tokens": 2
+            }
+        }
+    ]));
+
+    assert_eq!(
+        projected_response_text(&projected),
+        "Hello from Claude Code"
+    );
+    assert_eq!(
+        projected,
+        json!({
+            "content": [{"type": "text", "text": "Hello from Claude Code"}],
+            "role": "assistant",
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 17,
+                "output_tokens": 4,
+                "cache_read_input_tokens": 1,
+                "cache_creation_input_tokens": 2
+            }
+        })
+    );
+}
+
+#[test]
+fn claude_code_response_prefers_structured_output_tool_input() {
+    let projected = reshape_claude_code_response(json!({
+        "stdout": "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"StructuredOutput\",\"input\":{\"answer\":\"JSON\"}}]}}\n{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"ignored\"}"
+    }));
+
+    assert_eq!(projected_response_text(&projected), r#"{"answer":"JSON"}"#);
+}
+
+#[test]
+fn acp_response_projects_to_common_text_shape() {
+    let projected = reshape_acp_response(json!({
+        "content": [{"type": "text", "text": "Hello from ACP"}],
+        "model": "stub",
+        "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0
+        },
+        "stop-reason": "end_turn"
+    }));
+
+    assert_eq!(projected_response_text(&projected), "Hello from ACP");
+    assert_eq!(
+        projected,
+        json!({
+            "content": [{"type": "text", "text": "Hello from ACP"}],
+            "role": "assistant",
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0
+            }
+        })
+    );
+}
+
+#[test]
 fn provider_response_dispatches_by_clojure_message_format() {
     let openai = reshape_provider_response(
         "groq",
@@ -125,11 +203,17 @@ fn provider_response_dispatches_by_clojure_message_format() {
     .unwrap();
     assert_eq!(projected_response_text(&anthropic), "Max fixture");
 
-    let error = reshape_provider_response("claude-code", json!({})).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("fixture response replay does not support provider 'claude-code'"),
-        "unexpected error: {error}"
-    );
+    let claude_code = reshape_provider_response(
+        "claude-code",
+        json!({"type": "result", "subtype": "success", "result": "Claude fixture"}),
+    )
+    .unwrap();
+    assert_eq!(projected_response_text(&claude_code), "Claude fixture");
+
+    let acp = reshape_provider_response(
+        "acp",
+        json!({"content": [{"type": "text", "text": "ACP fixture"}]}),
+    )
+    .unwrap();
+    assert_eq!(projected_response_text(&acp), "ACP fixture");
 }

@@ -15,6 +15,8 @@ use serde_json::{json, Map, Value};
 
 const DEFAULT_BEDROCK_REGION: &str = "us-east-1";
 const MAX_SYSTEM_CACHE_POINTS: usize = 3;
+const CLAUDE_CODE_SYSTEM_PROMPT_SPOOL_THRESHOLD_BYTES: usize = 262_144;
+const ACP_DEFAULT_TIMEOUT_MS: u64 = 600_000;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BedrockConfig {
@@ -158,6 +160,62 @@ pub fn build_anthropic_request(config: &ProviderChatConfig, messages: &[ChatMess
     Value::Object(request)
 }
 
+pub fn build_claude_code_request(config: &ProviderChatConfig, messages: &[ChatMessage]) -> Value {
+    let (system_prompt, prompt) = flatten_claude_code_messages(messages);
+    let mut argv = vec![
+        "claude".to_string(),
+        "-p".to_string(),
+        "--no-session-persistence".to_string(),
+        "--output-format".to_string(),
+        "json".to_string(),
+        "--tools".to_string(),
+        String::new(),
+        "--setting-sources".to_string(),
+        String::new(),
+        "--strict-mcp-config".to_string(),
+        "--disable-slash-commands".to_string(),
+        "--max-turns".to_string(),
+        "1".to_string(),
+    ];
+
+    if !config.model.trim().is_empty() {
+        argv.extend(["--model".to_string(), config.model.clone()]);
+    }
+    if let Some(max_tokens) = config.max_tokens {
+        argv.extend(["--max-tokens".to_string(), max_tokens.to_string()]);
+    }
+
+    let system_prompt_spooled = system_prompt
+        .as_ref()
+        .map(|prompt| prompt.len() > CLAUDE_CODE_SYSTEM_PROMPT_SPOOL_THRESHOLD_BYTES)
+        .unwrap_or(false);
+    if let Some(system_prompt) = system_prompt {
+        if system_prompt_spooled {
+            argv.extend([
+                "--system-prompt-file".to_string(),
+                "<spooled-system-prompt>".to_string(),
+            ]);
+        } else {
+            argv.extend(["--system-prompt".to_string(), system_prompt]);
+        }
+    }
+
+    json!({
+        "argv": argv,
+        "stdin": prompt,
+        "system_prompt_spooled": system_prompt_spooled
+    })
+}
+
+pub fn build_acp_request(config: &ProviderChatConfig, messages: &[ChatMessage]) -> Value {
+    json!({
+        "backend": "stub",
+        "model": config.model.clone(),
+        "prompt": [{"type": "text", "text": flatten_acp_messages(messages)}],
+        "timeout_ms": ACP_DEFAULT_TIMEOUT_MS
+    })
+}
+
 pub fn build_provider_request(
     provider: &str,
     config: &ProviderChatConfig,
@@ -172,6 +230,14 @@ pub fn build_provider_request(
         | "ollama" | "mistral" | "deepseek" | "apple-fm" => Ok(ProviderRequestProjection {
             operation: "chat/completions",
             request: build_openai_compatible_request(config, messages),
+        }),
+        "claude-code" => Ok(ProviderRequestProjection {
+            operation: "claude-code/subprocess",
+            request: build_claude_code_request(config, messages),
+        }),
+        "acp" => Ok(ProviderRequestProjection {
+            operation: "acp/session-prompt",
+            request: build_acp_request(config, messages),
         }),
         other => bail!("dry-run request shaping does not support provider '{other}'"),
     }
@@ -397,6 +463,78 @@ pub fn reshape_anthropic_response(response: Value) -> Value {
     Value::Object(projected)
 }
 
+pub fn reshape_claude_code_response(response: Value) -> Value {
+    let events = claude_code_events(&response);
+    let result_event = claude_code_result_event(&events);
+    let result_text = result_event
+        .and_then(|event| event.get("result"))
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string);
+    let text = claude_code_structured_output(&events)
+        .or(result_text)
+        .or_else(|| claude_code_assistant_text(&events))
+        .or_else(|| response.as_str().map(str::to_string))
+        .unwrap_or_default();
+
+    let mut projected = Map::new();
+    projected.insert(
+        "content".to_string(),
+        Value::Array(vec![json!({"type": "text", "text": text})]),
+    );
+    projected.insert("role".to_string(), Value::String("assistant".to_string()));
+    projected.insert(
+        "stop_reason".to_string(),
+        claude_code_stop_reason(result_event).unwrap_or(Value::Null),
+    );
+
+    if let Some(usage) = result_event
+        .and_then(|event| event.get("usage"))
+        .and_then(Value::as_object)
+    {
+        let usage = project_anthropic_usage(usage);
+        if !usage.is_empty() {
+            projected.insert("usage".to_string(), Value::Object(usage));
+        }
+    }
+
+    Value::Object(projected)
+}
+
+pub fn reshape_acp_response(response: Value) -> Value {
+    let mut text_blocks = anthropic_text_blocks(response.get("content"));
+    if text_blocks.is_empty() {
+        if let Some(text) = response
+            .get("result")
+            .or_else(|| response.get("text"))
+            .and_then(Value::as_str)
+        {
+            text_blocks.push(json!({"type": "text", "text": text}));
+        }
+    }
+
+    let mut projected = Map::new();
+    projected.insert("content".to_string(), Value::Array(text_blocks));
+    projected.insert("role".to_string(), Value::String("assistant".to_string()));
+    projected.insert(
+        "stop_reason".to_string(),
+        response
+            .get("stop_reason")
+            .or_else(|| response.get("stop-reason"))
+            .cloned()
+            .unwrap_or(Value::Null),
+    );
+
+    if let Some(usage) = response.get("usage").and_then(Value::as_object) {
+        let usage = project_anthropic_usage(usage);
+        if !usage.is_empty() {
+            projected.insert("usage".to_string(), Value::Object(usage));
+        }
+    }
+
+    Value::Object(projected)
+}
+
 pub fn reshape_provider_response(provider: &str, response: Value) -> Result<Value> {
     match provider.trim() {
         "bedrock" => Ok(reshape_bedrock_response(response)),
@@ -405,6 +543,8 @@ pub fn reshape_provider_response(provider: &str, response: Value) -> Result<Valu
         | "ollama" | "mistral" | "deepseek" | "apple-fm" => {
             Ok(reshape_openai_compatible_response(response))
         }
+        "claude-code" => Ok(reshape_claude_code_response(response)),
+        "acp" => Ok(reshape_acp_response(response)),
         other => bail!("fixture response replay does not support provider '{other}'"),
     }
 }
@@ -476,6 +616,47 @@ fn anthropic_messages(messages: &[ChatMessage]) -> Value {
             })
             .collect(),
     )
+}
+
+fn flatten_claude_code_messages(messages: &[ChatMessage]) -> (Option<String>, String) {
+    let system_prompt = collect_system_text(messages);
+    let other_messages = messages
+        .iter()
+        .filter(|message| message.role != "system")
+        .collect::<Vec<_>>();
+    let prompt = if other_messages.len() == 1 {
+        other_messages[0].content.clone()
+    } else {
+        other_messages
+            .iter()
+            .map(|message| format!("[{}]: {}", message.role, message.content))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+    (system_prompt, prompt)
+}
+
+fn flatten_acp_messages(messages: &[ChatMessage]) -> String {
+    let system_text = collect_system_text(messages);
+    let other_messages = messages
+        .iter()
+        .filter(|message| message.role != "system")
+        .collect::<Vec<_>>();
+    let body = if other_messages.len() == 1 {
+        other_messages[0].content.clone()
+    } else {
+        other_messages
+            .iter()
+            .map(|message| format!("[{}]: {}", message.role, message.content))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+
+    match system_text {
+        Some(system_text) if !body.is_empty() => format!("{system_text}\n\n{body}"),
+        Some(system_text) => system_text,
+        None => body,
+    }
 }
 
 fn append_cache_point_to_last_user(messages: &mut [Value]) {
@@ -886,6 +1067,113 @@ fn anthropic_text_blocks(content: Option<&Value>) -> Vec<Value> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn claude_code_events(response: &Value) -> Vec<Value> {
+    if let Some(stdout) = response.get("stdout").and_then(Value::as_str) {
+        return parse_claude_code_stdout(stdout);
+    }
+    if let Some(stdout) = response.as_str() {
+        return parse_claude_code_stdout(stdout);
+    }
+    if let Some(events) = response.as_array() {
+        return events.clone();
+    }
+    if response.is_object() {
+        return vec![response.clone()];
+    }
+    Vec::new()
+}
+
+fn parse_claude_code_stdout(stdout: &str) -> Vec<Value> {
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+        return match parsed {
+            Value::Array(events) => events,
+            Value::Object(_) => vec![parsed],
+            _ => Vec::new(),
+        };
+    }
+
+    trimmed
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line.trim()).ok())
+        .collect()
+}
+
+fn claude_code_result_event(events: &[Value]) -> Option<&Value> {
+    events.iter().rev().find(|event| {
+        event
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|event_type| event_type == "result")
+    })
+}
+
+fn claude_code_structured_output(events: &[Value]) -> Option<String> {
+    events
+        .iter()
+        .filter(|event| {
+            event
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|event_type| event_type == "assistant")
+        })
+        .filter_map(|event| event.pointer("/message/content").and_then(Value::as_array))
+        .flat_map(|blocks| blocks.iter())
+        .find_map(|block| {
+            let object = block.as_object()?;
+            let block_type = object.get("type").and_then(Value::as_str);
+            let name = object.get("name").and_then(Value::as_str);
+            if block_type != Some("tool_use") || name != Some("StructuredOutput") {
+                return None;
+            }
+            let input = object.get("input")?;
+            input
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| serde_json::to_string(input).ok())
+        })
+}
+
+fn claude_code_assistant_text(events: &[Value]) -> Option<String> {
+    let text = events
+        .iter()
+        .filter(|event| {
+            event
+                .get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|event_type| event_type == "assistant")
+        })
+        .filter_map(|event| event.pointer("/message/content").and_then(Value::as_array))
+        .flat_map(|blocks| blocks.iter())
+        .filter_map(|block| {
+            let object = block.as_object()?;
+            if object.get("type").and_then(Value::as_str) == Some("text") {
+                object.get("text").and_then(Value::as_str)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+fn claude_code_stop_reason(result_event: Option<&Value>) -> Option<Value> {
+    let event = result_event?;
+    event
+        .get("stop_reason")
+        .or_else(|| event.get("stop-reason"))
+        .or_else(|| event.get("terminal_reason"))
+        .cloned()
+        .or_else(|| {
+            let subtype = event.get("subtype").and_then(Value::as_str);
+            matches!(subtype, Some("success")).then(|| Value::String("end_turn".to_string()))
+        })
 }
 
 fn copy_usage_key(

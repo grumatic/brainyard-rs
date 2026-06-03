@@ -94,6 +94,22 @@ pub struct RestoredSession {
     pub usage_tracker: Option<EdnValue>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SessionLock {
+    path: PathBuf,
+    pid: u32,
+}
+
+impl SessionLock {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+}
+
 pub fn list_sessions(root: impl AsRef<Path>) -> Result<Vec<SessionSummary>> {
     Ok(list_sessions_with_warnings(root)?.sessions)
 }
@@ -156,6 +172,81 @@ pub fn delete_session_dir(root: impl AsRef<Path>, session_id: &str) -> Result<bo
     std::fs::remove_dir_all(&target)
         .with_context(|| format!("failed to delete session path {}", target.display()))?;
     Ok(!target.exists())
+}
+
+pub fn try_acquire_session_lock(
+    root: impl AsRef<Path>,
+    session_id: &str,
+) -> Result<Option<SessionLock>> {
+    let root = root.as_ref();
+    let Some(target_name) = safe_session_dir_name(session_id) else {
+        anyhow::bail!("invalid session id for lock acquire: {session_id}");
+    };
+
+    let target = root.join(target_name);
+    std::fs::create_dir_all(&target)
+        .with_context(|| format!("failed to create session path {}", target.display()))?;
+    let lock_path = target.join("by-host.lock");
+    let pid = std::process::id();
+
+    loop {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(mut file) => {
+                writeln!(file, "{pid}")
+                    .with_context(|| format!("failed to write lock {}", lock_path.display()))?;
+                return Ok(Some(SessionLock {
+                    path: lock_path,
+                    pid,
+                }));
+            }
+            Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+                let owner = read_lock_pid(&lock_path)?;
+                if owner == Some(pid) || owner.is_some_and(process_alive) {
+                    return Ok(None);
+                }
+                match std::fs::remove_file(&lock_path) {
+                    Ok(()) => continue,
+                    Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                    Err(error) => {
+                        return Err(error).with_context(|| {
+                            format!("failed to remove stale lock {}", lock_path.display())
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to create lock {}", lock_path.display()));
+            }
+        }
+    }
+}
+
+pub fn release_session_lock(lock: SessionLock) -> Result<()> {
+    match read_lock_pid(&lock.path) {
+        Ok(Some(pid)) if pid != lock.pid => return Ok(()),
+        Ok(_) => {}
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|io_error| io_error.kind() == ErrorKind::NotFound) =>
+        {
+            return Ok(())
+        }
+        Err(error) => return Err(error),
+    }
+
+    match std::fs::remove_file(&lock.path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to remove lock {}", lock.path.display()))
+        }
+    }
 }
 
 pub fn save_session_meta(
@@ -505,6 +596,42 @@ fn read_meta_entries(path: &Path) -> Result<BTreeMap<String, EdnValue>> {
         .collect())
 }
 
+fn read_lock_pid(path: &Path) -> Result<Option<u32>> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read lock {}", path.display()));
+        }
+    };
+    Ok(raw.trim().parse::<u32>().ok())
+}
+
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    if pid == std::process::id() {
+        return true;
+    }
+    process_alive_platform(pid)
+}
+
+#[cfg(unix)]
+fn process_alive_platform(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .arg("-0")
+        .arg(pid.to_string())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(true)
+}
+
+#[cfg(not(unix))]
+fn process_alive_platform(_pid: u32) -> bool {
+    true
+}
+
 fn insert_string(entries: &mut BTreeMap<String, EdnValue>, key: &str, value: Option<&str>) {
     if let Some(value) = value {
         entries.insert(key.to_string(), EdnValue::String(value.to_string()));
@@ -583,6 +710,7 @@ fn format_edn_value(value: &EdnValue) -> String {
         EdnValue::Keyword(value) => format!(":{value}"),
         EdnValue::Symbol(value) => value.clone(),
         EdnValue::Instant(value) => format!("#inst \"{}\"", escape_edn_string(value)),
+        EdnValue::Uuid(value) => format!("#uuid \"{}\"", escape_edn_string(value)),
         EdnValue::Vector(values) => {
             let values = values
                 .iter()
@@ -590,6 +718,22 @@ fn format_edn_value(value: &EdnValue) -> String {
                 .collect::<Vec<_>>()
                 .join(" ");
             format!("[{values}]")
+        }
+        EdnValue::List(values) => {
+            let values = values
+                .iter()
+                .map(format_edn_value)
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("({values})")
+        }
+        EdnValue::Set(values) => {
+            let values = values
+                .iter()
+                .map(format_edn_value)
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("#{{{values}}}")
         }
         EdnValue::Map(map) => {
             let values = map
@@ -599,6 +743,27 @@ fn format_edn_value(value: &EdnValue) -> String {
                 .join(" ");
             format!("{{{values}}}")
         }
+        EdnValue::MapEntries(entries) => {
+            let values = entries
+                .iter()
+                .map(|(key, value)| {
+                    format!("{} {}", format_edn_map_key(key), format_edn_value(value))
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{{{values}}}")
+        }
+    }
+}
+
+fn format_edn_map_key(key: &EdnValue) -> String {
+    match key {
+        EdnValue::Keyword(value) => format!(":{value}"),
+        EdnValue::String(value) => format!("\"{}\"", escape_edn_string(value)),
+        EdnValue::Symbol(value) => value.clone(),
+        EdnValue::Integer(value) => value.to_string(),
+        EdnValue::Float(value) => format_edn_float(*value),
+        _ => format_edn_value(key),
     }
 }
 

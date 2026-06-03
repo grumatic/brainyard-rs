@@ -13,8 +13,12 @@ pub enum EdnValue {
     Keyword(String),
     Symbol(String),
     Instant(String),
+    Uuid(String),
     Vector(Vec<EdnValue>),
+    List(Vec<EdnValue>),
+    Set(Vec<EdnValue>),
     Map(EdnMap),
+    MapEntries(Vec<(EdnValue, EdnValue)>),
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -105,6 +109,7 @@ impl<'a> Parser<'a> {
         match ch {
             '{' => self.parse_map_value().map(EdnValue::Map),
             '[' => self.parse_vector().map(EdnValue::Vector),
+            '(' => self.parse_list().map(EdnValue::List),
             '"' => self.parse_string().map(EdnValue::String),
             ':' => self.parse_keyword().map(EdnValue::Keyword),
             '#' => self.parse_dispatch(),
@@ -150,10 +155,49 @@ impl<'a> Parser<'a> {
         Ok(values)
     }
 
+    fn parse_list(&mut self) -> Result<Vec<EdnValue>> {
+        self.expect('(')?;
+        let mut values = Vec::new();
+        loop {
+            self.skip_ws_and_comments();
+            if self.consume_if(')') {
+                break;
+            }
+            values.push(self.parse_value()?);
+        }
+        Ok(values)
+    }
+
+    fn parse_set(&mut self) -> Result<Vec<EdnValue>> {
+        let mut values = Vec::new();
+        loop {
+            self.skip_ws_and_comments();
+            if self.consume_if('}') {
+                break;
+            }
+            values.push(self.parse_value()?);
+        }
+        Ok(values)
+    }
+
     fn parse_dispatch(&mut self) -> Result<EdnValue> {
         if self.consume_str("#inst") {
             self.skip_ws_and_comments();
             return self.parse_string().map(EdnValue::Instant);
+        }
+        if self.consume_str("#uuid") {
+            self.skip_ws_and_comments();
+            return self.parse_string().map(EdnValue::Uuid);
+        }
+        if self.consume_str("#mulog/flake") {
+            return self.parse_value();
+        }
+        if self.consume_str("#{") {
+            return self.parse_set().map(EdnValue::Set);
+        }
+        if self.consume_str("#_") {
+            let _discarded = self.parse_value()?;
+            return self.parse_value();
         }
         bail!("unsupported EDN dispatch tag at byte {}", self.position())
     }

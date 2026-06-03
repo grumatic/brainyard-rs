@@ -274,6 +274,34 @@ pub fn extract_jsonrpc_result_from_events(events: &[SseEvent], request_id: u64) 
     bail!("MCP response for request id {request_id} was not found")
 }
 
+pub fn extract_jsonrpc_error_message_from_sse(
+    body_text: &str,
+    request_id: u64,
+) -> Result<Option<String>> {
+    extract_jsonrpc_error_message_from_events(&parse_sse_events(body_text), request_id)
+}
+
+pub fn extract_jsonrpc_error_message_from_events(
+    events: &[SseEvent],
+    request_id: u64,
+) -> Result<Option<String>> {
+    for event in events {
+        let parsed: Value = serde_json::from_str(&event.data).context("invalid SSE JSON data")?;
+        let Some(object) = parsed.as_object() else {
+            continue;
+        };
+        let Some(id) = object.get("id") else {
+            continue;
+        };
+        if !jsonrpc_id_matches(id, request_id) {
+            continue;
+        }
+        return Ok(object.get("error").map(jsonrpc_error_message));
+    }
+
+    Ok(None)
+}
+
 pub fn extract_jsonrpc_result_from_json(body_text: &str, request_id: u64) -> Result<Option<Value>> {
     let parsed: Value = serde_json::from_str(body_text).context("invalid JSON-RPC body")?;
     let Some(object) = parsed.as_object() else {
@@ -309,13 +337,7 @@ pub fn extract_jsonrpc_error_message_from_json(
         return Ok(None);
     };
 
-    Ok(Some(
-        error
-            .get("message")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| error.to_string()),
-    ))
+    Ok(Some(jsonrpc_error_message(error)))
 }
 
 pub fn tools_from_list_result(server_name: &str, result: &Value) -> Result<Vec<McpTool>> {
@@ -1009,6 +1031,14 @@ fn jsonrpc_id_matches(id: &Value, request_id: u64) -> bool {
         Value::String(value) => value == &request_id.to_string(),
         _ => false,
     }
+}
+
+fn jsonrpc_error_message(error: &Value) -> String {
+    error
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| error.to_string())
 }
 
 fn normalize_transport(transport: &str) -> String {

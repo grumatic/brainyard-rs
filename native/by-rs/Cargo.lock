@@ -658,6 +658,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "by-config",
+ "by-contracts",
  "by-llm",
  "by-mcp",
  "by-memory",
@@ -666,6 +667,7 @@ dependencies = [
  "by-tui",
  "clap",
  "predicates",
+ "regex",
  "rusqlite",
  "serde_json",
  "tempfile",
@@ -715,6 +717,8 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "rusqlite",
+ "serde_json",
+ "sha2 0.10.9",
  "tempfile",
 ]
 

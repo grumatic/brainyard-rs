@@ -14,6 +14,7 @@ tokio.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde_json.workspace = true
+by-contracts.workspace = true
 by-config.workspace = true
 by-llm.workspace = true
 by-mcp.workspace = true
@@ -21,6 +22,7 @@ by-memory.workspace = true
 by-persist.workspace = true
 by-registry.workspace = true
 by-tui.workspace = true
+regex.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
