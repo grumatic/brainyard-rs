@@ -37955,6 +37955,11 @@ fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOpti
                     limit = value;
                 }
             }
+            value if value.chars().all(|ch| ch.is_ascii_digit()) => {
+                if let Ok(value) = value.parse::<usize>() {
+                    limit = value;
+                }
+            }
             _ => {}
         }
     }

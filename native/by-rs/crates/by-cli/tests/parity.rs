@@ -190,6 +190,46 @@ fn run_init_list_snapshots_non_empty_matches_oracle() {
 }
 
 #[test]
+fn run_init_list_snapshots_positional_limit_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_init_list_snapshots_fixture(oracle_home.path());
+    write_init_list_snapshots_fixture(rust_home.path());
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        "/init list-snapshots 1\n/quit\n",
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        "/init list-snapshots 1\n/quit\n",
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for /init list-snapshots positional limit"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for /init list-snapshots positional limit"
+    );
+}
+
+#[test]
 fn run_init_revert_missing_arg_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
@@ -275,6 +315,21 @@ fn write_init_show_fixture(home: &Path) {
         "# Brainyard\n\n## Notes\nProject note\n",
     )
     .expect("write brainyard doc");
+}
+
+fn write_init_list_snapshots_fixture(home: &Path) {
+    let snapshot_dir = home.join(".brainyard/agents/init-agent/snapshots");
+    std::fs::create_dir_all(&snapshot_dir).expect("create init snapshot dir");
+    std::fs::write(
+        snapshot_dir.join("20260102-030405-project-new-snapshot.md"),
+        "# New\n",
+    )
+    .expect("write newer snapshot");
+    std::fs::write(
+        snapshot_dir.join("20250102-030405-project-old-snapshot.md"),
+        "# Old\n",
+    )
+    .expect("write older snapshot");
 }
 
 #[test]
