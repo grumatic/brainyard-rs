@@ -38002,11 +38002,16 @@ fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOpti
 fn render_run_init_list_snapshots(args: &str) -> Result<String> {
     let options = parse_run_init_list_snapshots_options(args);
     let scopes = init_doc_parse_scopes(&options.scope).map_err(anyhow::Error::msg)?;
-    let dirs = init_doc_dirs(None, None)?;
+    let mut dirs = init_doc_dirs(None, None)?;
+    dirs.user_dir = system_user_home_dir().or(dirs.user_dir);
+    let scope_filter = match options.scope.as_str() {
+        "project" | "user" => Some(options.scope.as_str()),
+        _ => None,
+    };
     let mut records = Vec::new();
     for scope in scopes {
         if let Some(base) = init_doc_scope_dir(&dirs, &scope) {
-            records.extend(init_doc_snapshot_records(&base, Some(&scope))?);
+            records.extend(init_doc_snapshot_records(&base, scope_filter)?);
         }
     }
     records.sort_by(|left, right| {

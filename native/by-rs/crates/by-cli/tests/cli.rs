@@ -339,6 +339,44 @@ fn run_init_list_snapshots_slash_renders_project_snapshot_records() {
 }
 
 #[test]
+fn run_init_list_snapshots_both_lists_cross_scope_records_from_project_base() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let snapshots_dir = project
+        .path()
+        .join(".brainyard/agents/init-agent/snapshots");
+    std::fs::create_dir_all(&snapshots_dir).unwrap();
+
+    let project_snapshot = snapshots_dir.join("20260102-030405-project-project-only.md");
+    let user_snapshot = snapshots_dir.join("20260103-030405-user-user-inside-project-base.md");
+    std::fs::write(&project_snapshot, "# Project snapshot\n").unwrap();
+    std::fs::write(&user_snapshot, "# User snapshot stored in project base\n").unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_PROJECT_DIR", project.path())
+        .env("BRAINYARD_SESSION_ID", "agt-init-list-both-cross-scope")
+        .env("BY_NO_DOTENV", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .env("COLUMNS", "120")
+        .args(["run", "--inline"])
+        .write_stdin("/init list-snapshots\n/quit\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("project-only"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("user-inside-project-base"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn run_init_revert_without_snapshot_prints_usage() {
     let home = tempfile::tempdir().unwrap();
 
