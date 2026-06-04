@@ -120,6 +120,20 @@ fn run_init_revert_missing_arg_matches_oracle() {
 }
 
 #[test]
+fn run_init_revert_missing_snapshot_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    assert_command_matches_oracle(
+        &oracle,
+        &["run", "--inline"],
+        "/init revert missing.md\n/quit\n",
+    );
+}
+
+#[test]
 fn run_help_command_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;

@@ -359,6 +359,59 @@ fn run_init_revert_without_snapshot_prints_usage() {
 }
 
 #[test]
+fn run_init_revert_restores_snapshot_and_writes_pre_revert_snapshot() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let brainyard_dir = project.path().join(".brainyard");
+    let snapshot_dir = brainyard_dir.join("agents/init-agent/snapshots");
+    std::fs::create_dir_all(&snapshot_dir).unwrap();
+    let brainyard_file = brainyard_dir.join("BRAINYARD.md");
+    std::fs::write(&brainyard_file, "# Current\n").unwrap();
+    let snapshot = snapshot_dir.join("20260102-030405-project-test-snapshot.md");
+    std::fs::write(&snapshot, "# Restored\n").unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-init-revert")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin(format!("/init revert {}\n/quit\n", snapshot.display()))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("{:ok? true"))
+        .stdout(predicate::str::contains(":scope :project"))
+        .stdout(predicate::str::contains(":restored-from"))
+        .stdout(predicate::str::contains(":pre-revert-snapshot"))
+        .stdout(predicate::str::contains(":dest"))
+        .stdout(predicate::str::contains("Unknown slash command: /init").not())
+        .stderr(predicate::str::is_empty());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains(&snapshot.display().to_string()));
+    assert_eq!(
+        std::fs::read_to_string(&brainyard_file).unwrap(),
+        "# Restored\n"
+    );
+
+    let mut pre_revert_snapshots = std::fs::read_dir(&snapshot_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path != &snapshot)
+        .collect::<Vec<_>>();
+    pre_revert_snapshots.sort();
+    assert_eq!(pre_revert_snapshots.len(), 1);
+    let pre_revert = &pre_revert_snapshots[0];
+    assert!(pre_revert
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .contains("-project-revert-test-snapshot.md"));
+    assert_eq!(std::fs::read_to_string(pre_revert).unwrap(), "# Current\n");
+}
+
+#[test]
 fn run_with_closed_stdin_stays_alive_like_tui() {
     let home = tempfile::tempdir().unwrap();
     let binary = assert_cmd::cargo::cargo_bin("by-rs");

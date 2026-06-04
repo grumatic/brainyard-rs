@@ -37853,6 +37853,20 @@ fn run_init_revert_missing_args(args: &str) -> bool {
     matches!(tokens.next(), Some("revert")) && tokens.next().is_none()
 }
 
+fn run_init_revert_snapshot_arg(args: &str) -> Option<&str> {
+    let trimmed = args.trim_start();
+    let rest = trimmed.strip_prefix("revert")?;
+    if !rest
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_whitespace())
+    {
+        return None;
+    }
+    let snapshot_path = rest.trim();
+    (!snapshot_path.is_empty()).then_some(snapshot_path)
+}
+
 fn print_run_init_show_slash_command(input: &str) {
     print_run_command_header(input);
     match render_run_init_show() {
@@ -37991,6 +38005,123 @@ fn render_run_init_list_snapshots(args: &str) -> Result<String> {
 fn print_run_init_revert_usage_slash_command(input: &str) {
     print_run_command_header(input);
     print_run_warning_line("Usage: /init revert <snapshot-path>  (use /init list-snapshots first)");
+}
+
+fn print_run_init_revert_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    match render_run_init_revert(args) {
+        Ok(block) => println!("{block}"),
+        Err(error) => print_run_warning_line(&format!("init$revert error: {error}")),
+    }
+}
+
+fn render_run_init_revert(args: &str) -> Result<String> {
+    let Some(snapshot_path) = run_init_revert_snapshot_arg(args) else {
+        return Ok(run_init_revert_error_edn(
+            "Provide :snapshot-path, or (:scope + :steps).",
+        ));
+    };
+    let dirs = init_doc_dirs(None, None)?;
+    let chosen = match init_doc_find_snapshot(&dirs, Some(Path::new(snapshot_path)), None, None)? {
+        Ok(record) => record,
+        Err(error) if error.starts_with("Snapshot not found:") => {
+            return Ok(run_init_revert_lookup_error_edn(&error));
+        }
+        Err(error) => return Ok(run_init_revert_error_edn(&error)),
+    };
+    let Some(base) = init_doc_scope_dir(&dirs, &chosen.scope) else {
+        return Ok(run_init_revert_error_edn(&format!(
+            "No .brainyard/ dir for scope {}",
+            chosen.scope
+        )));
+    };
+    let dest = match init_doc_brainyard_file(&dirs, &chosen.scope) {
+        Some(path) => path,
+        None => {
+            return Ok(run_init_revert_error_edn(&format!(
+                "No target file path for scope {}",
+                chosen.scope
+            )));
+        }
+    };
+    let pre_snapshot = match init_doc_take_snapshot(
+        &base,
+        &chosen.scope,
+        &format!(
+            "revert-to-{}",
+            if chosen.reason.is_empty() {
+                "snapshot"
+            } else {
+                &chosen.reason
+            }
+        ),
+        &dirs,
+    )? {
+        Ok(path) => path,
+        Err(error) => {
+            return Ok(run_init_revert_error_edn(&format!(
+                "Pre-revert snapshot failed: {error}"
+            )));
+        }
+    };
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    std::fs::copy(&chosen.path, &dest).with_context(|| {
+        format!(
+            "failed to restore {} to {}",
+            chosen.path.display(),
+            dest.display()
+        )
+    })?;
+    Ok(format!(
+        "{{:ok? true, :scope :{}, :restored-from {}, :pre-revert-snapshot {}, :dest {}}}",
+        chosen.scope,
+        edn_quote_string(&chosen.path.display().to_string()),
+        edn_quote_string(&pre_snapshot.display().to_string()),
+        edn_quote_string(&dest.display().to_string())
+    ))
+}
+
+fn init_doc_take_snapshot(
+    base: &Path,
+    scope: &str,
+    reason: &str,
+    dirs: &InitDocDirs,
+) -> Result<std::result::Result<PathBuf, String>> {
+    let Some(file) = init_doc_brainyard_file(dirs, scope) else {
+        return Ok(Err(format!("No .brainyard/ dir for scope {scope}")));
+    };
+    let snapshot_dir = init_doc_snapshot_dir(base);
+    std::fs::create_dir_all(&snapshot_dir)
+        .with_context(|| format!("failed to create {}", snapshot_dir.display()))?;
+    let out = snapshot_dir.join(init_doc_snapshot_filename(
+        &init_doc_now_ts(),
+        scope,
+        reason,
+    ));
+    if file.is_file() {
+        std::fs::copy(&file, &out).with_context(|| {
+            format!("failed to snapshot {} to {}", file.display(), out.display())
+        })?;
+    } else {
+        std::fs::write(&out, "")
+            .with_context(|| format!("failed to write empty snapshot {}", out.display()))?;
+    }
+    Ok(Ok(out))
+}
+
+fn run_init_revert_error_edn(error: &str) -> String {
+    format!("{{:ok? false, :error {}}}\n", edn_quote_string(error))
+}
+
+fn run_init_revert_lookup_error_edn(error: &str) -> String {
+    format!("{{:error {}}}\n", edn_quote_string(error))
+}
+
+fn edn_quote_string(value: &str) -> String {
+    serde_json::to_string(value).expect("serializing a string to JSON cannot fail")
 }
 
 fn run_static_slash_command_block(input: &str) -> Option<&'static str> {
@@ -38680,6 +38811,8 @@ fn handle_run_slash_command(ctx: RunSlashCommand<'_>) -> Result<bool> {
         print_run_init_show_slash_command(input);
     } else if command == "/init" && run_init_revert_missing_args(args) {
         print_run_init_revert_usage_slash_command(input);
+    } else if command == "/init" && run_init_revert_snapshot_arg(args).is_some() {
+        print_run_init_revert_slash_command(input, args);
     } else if command == "/memory" && run_help_args(args) {
         print_run_static_slash_command(input, RUN_MEMORY_HELP_BLOCK);
     } else if command == "/init" && run_help_args(args) {
