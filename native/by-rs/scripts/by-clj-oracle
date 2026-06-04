@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/../../.." && pwd)"
+app_dir="${repo_root}/projects/agent-tui-app"
+
+classpath="$(
+  cd "${app_dir}"
+  clojure -Spath
+)"
+
+absolute_classpath="$(
+  python3 - "${app_dir}" "${classpath}" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+app_dir = Path(sys.argv[1])
+classpath = sys.argv[2]
+parts = []
+for raw in classpath.split(os.pathsep):
+    path = Path(raw)
+    if not path.is_absolute():
+        path = app_dir / path
+    parts.append(str(path.resolve()))
+print(os.pathsep.join(parts))
+PY
+)"
+
+exec java --enable-native-access=ALL-UNNAMED \
+  -cp "${absolute_classpath}" \
+  clojure.main -m ai.brainyard.agent-tui-app.main "$@"

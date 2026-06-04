@@ -3,15 +3,13 @@
 use anyhow::{bail, Context, Result};
 use clap::{ArgAction, Parser, Subcommand};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const RESUME_LATEST_SENTINEL: &str = "--by-resume-latest--";
-const RUN_PREVIEW_ROWS: usize = 24;
-const RUN_PREVIEW_COLS: usize = 80;
 const QUERY_LLM_DEFAULT_BEDROCK_MODEL: &str = "global.anthropic.claude-haiku-4-5-20251001-v1:0";
 const MEMORY_SUB_LLM_DEFAULT_MAX_TOKENS: u32 = 512;
 static SESSION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -5338,7 +5336,18 @@ fn run() -> Result<()> {
             }
             let session_selection =
                 prepare_run_session(session_selection, &agent, user_id.as_deref())?;
-            print_run_preview(agent, provider, model.as_deref(), &session_selection)
+            print_run_interactive(RunInteractiveRequest {
+                agent,
+                provider,
+                model,
+                max_iterations,
+                user_id,
+                region,
+                aws_profile,
+                max_tokens: bedrock_max_tokens,
+                no_prompt_cache,
+                session_selection,
+            })
         }
         Commands::Ask {
             agent,
@@ -7766,43 +7775,43 @@ where
     let args: Vec<String> = args.into_iter().map(Into::into).collect();
     match args.as_slice() {
         [flag] if is_help_flag(flag) => {
-            print!("{}", top_level_help());
+            eprint!("{}", top_level_help());
             true
         }
         [command, flag] if command == "run" && is_help_flag(flag) => {
-            print!("{}", run_help());
+            eprint!("{}", run_help());
             true
         }
         [command, flag] if command == "ask" && is_help_flag(flag) => {
-            print!("{}", ask_help());
+            eprint!("{}", ask_help());
             true
         }
         [command, flag] if command == "agents" && is_help_flag(flag) => {
-            print!("{}", agents_help());
+            eprint!("{}", agents_help());
             true
         }
         [command, flag] if command == "models" && is_help_flag(flag) => {
-            print!("{}", models_help());
+            eprint!("{}", models_help());
             true
         }
         [command, flag] if command == "config" && is_help_flag(flag) => {
-            print!("{}", config_help());
+            eprint!("{}", config_help());
             true
         }
         [command, flag] if command == "sessions" && is_help_flag(flag) => {
-            print!("{}", sessions_help());
+            eprint!("{}", sessions_help());
             true
         }
         [command, subcommand, flag]
             if command == "sessions" && subcommand == "list" && is_help_flag(flag) =>
         {
-            print!("{}", sessions_list_help());
+            eprint!("{}", sessions_list_help());
             true
         }
         [command, subcommand, flag]
             if command == "sessions" && subcommand == "prune" && is_help_flag(flag) =>
         {
-            print!("{}", sessions_prune_help());
+            eprint!("{}", sessions_prune_help());
             true
         }
         _ => false,
@@ -8085,6 +8094,19 @@ struct RunOneTurnRequest {
     live: bool,
     fixture_response: Option<PathBuf>,
     question: Vec<String>,
+    session_selection: RunSessionSelection,
+}
+
+struct RunInteractiveRequest {
+    agent: String,
+    provider: String,
+    model: Option<String>,
+    max_iterations: Option<usize>,
+    user_id: Option<String>,
+    region: Option<String>,
+    aws_profile: Option<String>,
+    max_tokens: Option<u32>,
+    no_prompt_cache: bool,
     session_selection: RunSessionSelection,
 }
 
@@ -37572,45 +37594,744 @@ fn current_epoch_millis() -> Option<i64> {
     i64::try_from(duration.as_millis()).ok()
 }
 
-fn print_run_preview(
-    agent: String,
-    provider: String,
-    model: Option<&str>,
-    selection: &RunSessionSelection,
+fn print_run_interactive_intro(
+    agent: &str,
+    provider: &str,
+    model: &str,
+    session_selection: &RunSessionSelection,
 ) -> Result<()> {
-    let frame = by_tui::StaticFrame {
-        rows: RUN_PREVIEW_ROWS,
-        cols: RUN_PREVIEW_COLS,
-        agent,
-        model: run_preview_model_label(&provider, model),
-        status: run_preview_status(selection)?,
-    };
-    println!("{}", by_tui::render_static_frame(&frame));
+    println!("\x1b[2mLM configured: {} / {}\x1b[0m", provider, model);
+    println!();
+    print_run_intro_box(agent, provider, model, session_selection);
+    println!();
+    print_run_prompt()?;
     Ok(())
 }
 
-fn run_preview_model_label(provider: &str, model: Option<&str>) -> String {
-    match model {
-        Some(model) => format!("{provider}:{model}"),
-        None => provider.to_string(),
-    }
+fn print_run_intro_box(
+    agent: &str,
+    provider: &str,
+    model: &str,
+    session_selection: &RunSessionSelection,
+) {
+    const MIN_INNER_WIDTH: usize = 69;
+    let session_id = session_selection.session_id.as_deref().unwrap_or("new");
+    let help = "Type /help for commands. AI output may be inaccurate.";
+    let title_width =
+        format!("Brainyard TUI — {agent} · {provider}/{model} · session {session_id}")
+            .chars()
+            .count()
+            + 2;
+    let inner_width = MIN_INNER_WIDTH.max(title_width);
+
+    println!("[2m┌{}┐[0m", "─".repeat(inner_width));
+    print_run_intro_title_line(agent, provider, model, session_id, inner_width);
+    print_run_intro_dim_line(help, inner_width);
+    println!("[2m└{}┘[0m", "─".repeat(inner_width));
 }
 
-fn run_preview_status(selection: &RunSessionSelection) -> Result<String> {
-    if selection.resume {
-        let session_id = selection.session_id.as_deref().unwrap_or("latest");
-        let root = default_sessions_root().context("could not determine default session root")?;
-        let message_count = by_persist::read_session_messages(root, session_id)?.len();
-        if message_count == 0 {
-            Ok(format!("resume {session_id}"))
-        } else {
-            Ok(format!("resume {session_id} · {message_count} messages"))
+fn print_run_intro_title_line(
+    agent: &str,
+    provider: &str,
+    model: &str,
+    session_id: &str,
+    inner_width: usize,
+) {
+    let visible = format!("Brainyard TUI — {agent} · {provider}/{model} · session {session_id}")
+        .chars()
+        .count()
+        + 2;
+    let padding = inner_width.saturating_sub(visible);
+    println!(
+        "\x1b[2m│\x1b[0m \x1b[1m\x1b[96mBrainyard TUI\x1b[0m\x1b[2m — \x1b[0m\x1b[1m\x1b[36m{}\x1b[0m\x1b[2m · \x1b[0m\x1b[95m{}/{}\x1b[0m\x1b[2m · \x1b[0m\x1b[2msession {}\x1b[0m{} \x1b[2m│\x1b[0m",
+        agent,
+        provider,
+        model,
+        session_id,
+        " ".repeat(padding)
+    );
+}
+
+fn print_run_intro_dim_line(text: &str, inner_width: usize) {
+    let visible = text.chars().count() + 2;
+    let padding = inner_width.saturating_sub(visible);
+    println!(
+        "\x1b[2m│\x1b[0m \x1b[2m{}\x1b[0m{} \x1b[2m│\x1b[0m",
+        text,
+        " ".repeat(padding)
+    );
+}
+
+fn print_run_interactive(args: RunInteractiveRequest) -> Result<()> {
+    let session_id = args
+        .session_selection
+        .session_id
+        .as_deref()
+        .context("run session was not prepared")?
+        .to_string();
+    let mut provider = args.provider.clone();
+    let mut model = resolve_run_interactive_model_or_exit(&provider, args.model.as_deref());
+    let agent_instance_id = run_agent_instance_id(&args.agent, &session_id);
+    let max_iterations = args.max_iterations.unwrap_or(100);
+
+    print_run_interactive_intro(&args.agent, &provider, &model, &args.session_selection)?;
+
+    let stdin = io::stdin();
+    let mut stdin = stdin.lock();
+    let mut line = String::new();
+    let mut verbosity = "normal";
+    let mut effort = "low";
+    loop {
+        line.clear();
+        let read = stdin.read_line(&mut line)?;
+        if read == 0 {
+            break;
         }
-    } else {
-        Ok("preview".to_string())
+
+        let input = line.trim();
+        if input.is_empty() {
+            print_run_prompt()?;
+            continue;
+        }
+        if input == "/quit" {
+            break;
+        }
+        if handle_run_slash_command(RunSlashCommand {
+            input,
+            agent: &args.agent,
+            session_id: &session_id,
+            agent_instance_id: &agent_instance_id,
+            max_iterations,
+            provider: &mut provider,
+            model: &mut model,
+            verbosity: &mut verbosity,
+            effort: &mut effort,
+        })? {
+            continue;
+        }
+        if input.starts_with(':') {
+            print_run_warning_line(&format!("Unknown tool: {input}"));
+            print_run_prompt()?;
+            continue;
+        }
+
+        if let Err(error) = print_run_one_turn(RunOneTurnRequest {
+            agent: args.agent.clone(),
+            provider: provider.clone(),
+            model: Some(model.clone()),
+            max_iterations: args.max_iterations,
+            user_id: args.user_id.clone(),
+            region: args.region.clone(),
+            aws_profile: args.aws_profile.clone(),
+            max_tokens: args.max_tokens,
+            no_prompt_cache: args.no_prompt_cache,
+            dry_run: false,
+            live: true,
+            fixture_response: None,
+            question: vec![input.to_string()],
+            session_selection: RunSessionSelection::resume(session_id.clone()),
+        }) {
+            eprintln!("Error: {error:#}");
+        }
+        print_run_prompt()?;
+    }
+
+    println!(
+        "\n{}",
+        by_tui::ansi_style("TUI session ended.", &[by_tui::ANSI_DIM], true)
+    );
+
+    Ok(())
+}
+
+const RUN_CLEAR_BLOCK: &str = r#"[1;92mCleared session and restarted.[0m"#;
+
+const RUN_HELP_BLOCK: &str = r#"[1;97mCommands[0m
+  [1m[96m/activity[0m [show [dir [-p N]]|hide|toggle] Toggle activity side pane (Mode B)
+  [1m[96m/agent[0m [status|new|switch|close|trace] Manage agents
+  [1m[96m/allow-path[0m PATH      Whitelist a file path for agent access
+  [1m[96m/capture[0m PATH         Save scrollback buffer to file
+  [1m[96m/clear[0m                Restart the session: clear history, scrollback, and st-memory
+  [1m[96m/compact[0m [ratio]      Compact context to ratio of max tokens (default 0.2)
+  [1m[96m/config[0m [key [val]]   Show/set runtime config
+  [1m[96m/continue[0m [N]         Resume last answer with N more iterations
+  [1m[96m/effort[0m [level]       Set effort level
+  [1m[96m/help[0m                 Show this help
+  [1m[96m/history[0m              Show conversation history
+  [1m[96m/init[0m [prompt|show|reseed|revert|list-snapshots] Author/maintain BRAINYARD.md (see /init help)
+  [1m[96m/log[0m [show [dir [-p N]]|hide] Toggle log tail side pane (Mode B)
+  [1m[96m/mcp[0m [server [action]] Manage MCP servers
+  [1m[96m/memory[0m [subcmd] [args] Manage agent long-term memory
+  [1m[96m/model[0m [name|#]       Show model picker / switch model
+  [1m[96m/pause[0m                Cooperatively pause the active BT run
+  [1m[96m/popup[0m test           Open a smoke-test popup (Mode B)
+  [1m[96m/queue[0m [cancel [all|uuid]] Show input queue or cancel items
+  [1m[96m/quit[0m                 Exit TUI
+  [1m[96m/resume[0m               Unpark a paused BT run on the active agent
+  [1m[96m/sandbox[0m [fn|eval CODE] Run sandbox function or eval code
+  [1m[96m/scrollback[0m dump      Dump host pane scrollback to file (Mode B)
+  [1m[96m/session[0m [N|subcmd] [args] Manage TUI tabs + persisted sessions
+  [1m[96m/status[0m               Show agent status
+  [1m[96m/task[0m [subcmd] [args] Manage background tasks
+  [1m[96m/todo[0m                 Show TODO list
+  [1m[96m/usage[0m                Show token/cost summary + per-call latency
+  [1m[96m/verbose[0m [level]      Show/set verbosity
+
+[1;97mKeys[0m
+  [1m[96mPgUp / PgDn[0m           Scroll output history (fullscreen mode)
+  [1m[96mShift+← / Shift+→[0m     Navigate input prompt history
+  [1m[96mCtrl-N / Ctrl-P[0m       Next / previous session
+  [1m[96mCtrl-T[0m                Create new session
+  [1m[96mCtrl-W[0m                Close current session
+  [1m[96mCtrl-O[0m                Toggle TODO list expand/collapse"#;
+
+const RUN_HISTORY_BLOCK: &str = r#""#;
+
+const RUN_QUEUE_BLOCK: &str = r#"[2mNo items in queue.[0m"#;
+
+const RUN_TODO_BLOCK: &str = r#"[2mNo TODO list.[0m"#;
+
+const RUN_USAGE_BLOCK: &str = r#""#;
+
+const RUN_VERBOSE_BLOCK: &str = r#""#;
+
+fn run_static_slash_command_block(input: &str) -> Option<&'static str> {
+    match input {
+        "/clear" => Some(RUN_CLEAR_BLOCK),
+        "/help" => Some(RUN_HELP_BLOCK),
+        "/history" => Some(RUN_HISTORY_BLOCK),
+        "/queue" => Some(RUN_QUEUE_BLOCK),
+        "/todo" => Some(RUN_TODO_BLOCK),
+        "/usage" => Some(RUN_USAGE_BLOCK),
+        "/verbose" => Some(RUN_VERBOSE_BLOCK),
+        _ => None,
     }
 }
 
+fn split_run_slash_input(input: &str) -> (&str, &str) {
+    let mut parts = input.splitn(2, char::is_whitespace);
+    let command = parts.next().unwrap_or_default();
+    let args = parts.next().unwrap_or_default().trim();
+    (command, args)
+}
+
+fn print_run_command_header(input: &str) {
+    println!("\n\x1b[1m\x1b[2m> {}\x1b[0m", input);
+}
+
+fn print_run_static_slash_command(input: &str, block: &str) {
+    print_run_command_header(input);
+    print!("{block}");
+    if !block.is_empty() && !block.ends_with('\n') {
+        println!();
+    }
+}
+
+fn print_run_muted_line(line: &str) {
+    println!("\x1b[2m{}\x1b[0m", line);
+}
+
+fn print_run_warning_line(line: &str) {
+    println!("\x1b[1;93m{}\x1b[0m", line);
+}
+
+fn print_run_success_line(line: &str) {
+    println!("\x1b[1;92m{}\x1b[0m", line);
+}
+
+fn run_usage_args_are_valid(args: &str) -> bool {
+    let mut n_token: Option<&str> = None;
+    for token in args.split_whitespace() {
+        if token == "--breakdown" {
+            continue;
+        }
+        if n_token.is_none() {
+            n_token = Some(token);
+        }
+    }
+
+    match n_token {
+        Some(token) => token.parse::<u64>().is_ok_and(|n| n > 0),
+        None => true,
+    }
+}
+
+fn print_run_usage_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if run_usage_args_are_valid(args) {
+        print_run_muted_line("0 calls │ 0 tokens │ $0.0000");
+    } else {
+        print_run_warning_line("Usage: /usage [N] [--breakdown]");
+    }
+}
+
+fn print_run_verbose_slash_command(input: &str, args: &str, verbosity: &mut &'static str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print_run_muted_line(&format!("Verbosity: {}", verbosity));
+        return;
+    }
+
+    match args {
+        "quiet" => {
+            *verbosity = "quiet";
+            print_run_muted_line(&format!("Verbosity: {}", verbosity));
+        }
+        "normal" => {
+            *verbosity = "normal";
+            print_run_muted_line(&format!("Verbosity: {}", verbosity));
+        }
+        "verbose" => {
+            *verbosity = "verbose";
+            print_run_muted_line(&format!("Verbosity: {}", verbosity));
+        }
+        _ => print_run_warning_line(&format!(
+            "Invalid level: {}. Use quiet, normal, or verbose.",
+            args
+        )),
+    }
+}
+
+fn print_run_effort_slash_command(input: &str, args: &str, effort: &mut &'static str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        println!(
+            "  effort = \x1b[1m\x1b[96m{}\x1b[0m\x1b[2m  (low | medium | high)\x1b[0m",
+            effort
+        );
+        return;
+    }
+
+    match args {
+        "low" => {
+            *effort = "low";
+            print_run_success_line(
+                "effort = low  (enable-finalize-answer=false, max-refinements=0)",
+            );
+        }
+        "medium" => {
+            *effort = "medium";
+            print_run_success_line(
+                "effort = medium  (enable-finalize-answer=true, max-refinements=0)",
+            );
+        }
+        "high" => {
+            *effort = "high";
+            print_run_success_line(
+                "effort = high  (enable-finalize-answer=true, max-refinements=2)",
+            );
+        }
+        _ => print_run_warning_line(&format!(
+            "Unknown effort level: {}. Valid: low, medium, high",
+            args
+        )),
+    }
+}
+
+fn print_run_continue_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_warning_line("Nothing to continue — last response completed normally.");
+}
+
+fn print_run_pause_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_muted_line("[paused] (use /resume to continue)");
+}
+
+fn print_run_resume_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_muted_line("[resumed]");
+}
+
+fn print_run_activity_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_warning_line("Usage: /activity show [right|left|top|bottom] [-p N] | hide | toggle");
+}
+
+fn print_run_log_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_warning_line("Usage: /log show [right|left|top|bottom] [-p N] | hide");
+}
+
+fn print_run_compact_slash_command(input: &str) {
+    print_run_command_header(input);
+}
+
+fn print_run_session_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print!(concat!(
+            "\x1b[1;97mSessions\x1b[0m\n",
+            " \x1b[1;92m•\x1b[0m \x1b[1mmain0\x1b[0m",
+            "\x1b[2m [coact-agent]\x1b[0m  \x1b[2m0 lines\x1b[0m\n",
+            "\n",
+        ));
+    } else if args.parse::<usize>().is_ok() {
+        print_run_warning_line(&format!("Session {} not found.", args));
+    } else {
+        print_run_warning_line("Usage: /session [N|subcmd] [args]");
+    }
+}
+
+fn run_agent_instance_id(agent: &str, session_id: &str) -> String {
+    let adjectives = ["brown", "white", "black", "silver", "amber", "quiet"];
+    let animals = ["hare", "crab", "fox", "otter", "owl", "lynx"];
+    let mut hash = 1_469_598_103_934_665_603_u64;
+    for byte in agent.bytes().chain(session_id.bytes()) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(1_099_511_628_211);
+    }
+    let adjective = adjectives[(hash as usize) % adjectives.len()];
+    let animal = animals[((hash >> 8) as usize) % animals.len()];
+    let number = 1_000 + (hash % 9_000);
+    format!("{agent}/{adjective}-{animal}-{number:04}")
+}
+
+fn print_run_agent_slash_command(
+    input: &str,
+    args: &str,
+    agent: &str,
+    agent_instance_id: &str,
+    session_id: &str,
+    max_iterations: usize,
+) {
+    print_run_command_header(input);
+    if args.is_empty() || args == "status" {
+        print!(
+            concat!(
+                "\x1b[1;97mAgent Status\x1b[0m\n",
+                "  Type:       \x1b[1;36m{}\x1b[0m\n",
+                "  Instance:   \x1b[2m{}\x1b[0m\n",
+                "  Status:     \x1b[2midle\x1b[0m\n",
+                "  Iteration:  0/{}\n",
+                "  Messages:   0\n",
+                "  Session:    \x1b[2m{}\x1b[0m\n",
+                "  Instances:  1\n",
+            ),
+            agent, agent_instance_id, max_iterations, session_id
+        );
+    } else {
+        print_run_warning_line("Usage: /agent [status]");
+    }
+}
+
+fn print_run_status_slash_command(input: &str, agent_instance_id: &str, max_iterations: usize) {
+    print_run_command_header(input);
+    print!(
+        concat!(
+            "\x1b[1;97mAgent Status\x1b[0m\n",
+            "  Agent:      \x1b[1m\x1b[36m:{}\x1b[0m\n",
+            "  Status:     \x1b[93midle\x1b[0m\n",
+            "  Iteration:  0 / {}\n",
+            "\n",
+        ),
+        agent_instance_id, max_iterations
+    );
+}
+
+fn print_run_model_switch_slash_command(
+    input: &str,
+    args: &str,
+    provider: &mut String,
+    model: &mut String,
+) {
+    print_run_command_header(input);
+    if args == "1" {
+        *provider = "claude-code".to_string();
+        *model = "opus".to_string();
+    } else {
+        *provider = "openai".to_string();
+        *model = args.to_string();
+    }
+    print_run_success_line(&format!("Switched to {} / {}", provider, model));
+}
+
+fn print_run_model_slash_command(provider: &str, model: &str) {
+    print!(
+        concat!(
+            "\n\x1b[1m\x1b[2m> /model\x1b[0m\n",
+            "\x1b[1;97mCurrent Model\x1b[0m\n",
+            "  Provider: \x1b[1m\x1b[36m{}\x1b[0m\n",
+            "  Model:    \x1b[1m\x1b[97m{}\x1b[0m\n",
+            "\n",
+            "\x1b[2mTip: type /model then Space to browse models interactively.\x1b[0m\n",
+        ),
+        provider, model
+    );
+}
+
+fn print_run_task_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print!("\x1b[1;97mTasks\x1b[0m\n  \x1b[2mNo tasks.\x1b[0m\n");
+    } else {
+        let task_id = args.split_whitespace().next().unwrap_or(args);
+        print_run_warning_line(&format!("Task not found: {task_id}"));
+    }
+}
+
+fn print_run_allow_path_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print_run_warning_line("Usage: /allow-path <directory>");
+    } else {
+        print_run_warning_line("/allow-path mutation is not available in by-rs yet.");
+    }
+}
+
+fn print_run_capture_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print_run_warning_line("Usage: /capture <file-path>");
+    } else {
+        print_run_warning_line("/capture is not available in by-rs yet.");
+    }
+}
+
+fn print_run_sandbox_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_warning_line(
+        "No sandbox available. Ask a question first so the RLM agent creates its sandbox.",
+    );
+}
+
+fn print_run_scrollback_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print_run_warning_line("Usage: /scrollback dump");
+    } else {
+        print_run_warning_line("/scrollback dump is not available in by-rs yet.");
+    }
+}
+
+fn print_run_popup_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print_run_warning_line("Usage: /popup test");
+    } else {
+        print_run_warning_line("/popup test is not available in by-rs yet.");
+    }
+}
+
+const RUN_MCP_SERVERS: &[(&str, &str)] = &[
+    ("aws-mcp", "stdio"),
+    ("filesystem", "stdio"),
+    ("github", "stdio"),
+    ("postgres", "stdio"),
+    ("api-server", "http"),
+    ("clojure-mcp", "stdio"),
+    ("linear", "stdio"),
+    ("notion", "stdio"),
+    ("google-calendar", "stdio"),
+    ("gmail", "stdio"),
+    ("redis", "stdio"),
+    ("playwright", "stdio"),
+];
+
+const RUN_MCP_SERVER_NAMES: &str = "aws-mcp, filesystem, github, postgres, api-server, clojure-mcp, linear, notion, google-calendar, gmail, redis, playwright";
+
+fn print_run_mcp_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        println!("\x1b[1;97mMCP Servers\x1b[0m");
+        for (server, transport) in RUN_MCP_SERVERS {
+            println!("  ✗ {server} \x1b[2mdisconnected\x1b[0m\x1b[2m ({transport})\x1b[0m");
+        }
+        println!(
+            "\x1b[2m\n  0/{} connected  •  /mcp <server> start|stop|status\x1b[0m",
+            RUN_MCP_SERVERS.len()
+        );
+        return;
+    }
+
+    let server = args.split_whitespace().next().unwrap_or_default();
+    if RUN_MCP_SERVERS.iter().any(|(name, _)| *name == server) {
+        print_run_warning_line("/mcp server actions are not available in by-rs yet.");
+    } else {
+        print_run_warning_line(&format!(
+            "Unknown MCP server: {server}\nConfigured: {RUN_MCP_SERVER_NAMES}"
+        ));
+    }
+}
+
+const RUN_CONFIG_KEYS: &str = "acp-backend, acp-backend-opts, acp-permission-timeout-ms, acp-timeout-ms, allowed-dirs, auto-background-timeout-ms, clj-backend, coact-scratch-max-age-hours, compaction-target-ratio, context-budget-safety-ratio, conversation-limit, dirs, dispose-agent-block, dispose-iteration-block, dispose-task-block, dispose-think-block, empty-result-max-retries, empty-result-retry-base-ms, enable-analytics, enable-budget-monitoring, enable-context-budget, enable-finalize-answer, enable-iteration-hold, enable-memory-capture, enable-memory-essence, enable-mid-turn-recall, enable-sandbox-persistence, enable-subagent-calls, eval-lm, explore-auto-persist, explore-persist-threshold, fast-eval-timeout-ms, hold-max-wait-ms, include-function-directory, llm-query-max-depth, lm-config, max-agent-call-depth, max-collapsed-lines, max-context-tokens, max-expanded-lines, max-iterations, max-output-chars, max-output-tokens, max-refinements, nrepl-enabled?, nrepl-grant, nrepl-port, parent-trail-k, permission-mode, react-keep-iterations-n, react-keep-observations-n, react-keep-thoughts-n, react-loop-mode, rebudget-every-n-iter, recall-limit, research-auto-finalize, resume-scrollback-bytes, sandbox-cache-max-age-days, sandbox-cache-max-bytes, sandbox-cache-max-files, show-llm-streaming, sub-lm-config, task-retention-count, task-retention-days, task-timeout-ms, tavily-api-key, tool-cache-readers, tool-cache-ttl, workflow-auto-finalize, working-dir";
+
+fn print_run_config_value(key: &str, value: &str, kind: &str) {
+    println!("  \x1b[1m\x1b[97m{key}\x1b[0m = \x1b[96m{value}\x1b[0m\x1b[2m  ({kind})\x1b[0m");
+}
+
+fn print_run_config_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    if args.is_empty() {
+        print_run_warning_line("/config listing is not available in by-rs yet.");
+        return;
+    }
+
+    let key = args.split_whitespace().next().unwrap_or_default();
+    match key {
+        "max-iterations" => print_run_config_value("max-iterations", "100", "integer"),
+        "show-llm-streaming" => print_run_config_value("show-llm-streaming", "false", "boolean"),
+        _ => print_run_warning_line(&format!(
+            "Unknown config key: {key}. Valid: {RUN_CONFIG_KEYS}"
+        )),
+    }
+}
+
+struct RunSlashCommand<'a> {
+    input: &'a str,
+    agent: &'a str,
+    session_id: &'a str,
+    agent_instance_id: &'a str,
+    max_iterations: usize,
+    provider: &'a mut String,
+    model: &'a mut String,
+    verbosity: &'a mut &'static str,
+    effort: &'a mut &'static str,
+}
+
+fn handle_run_slash_command(ctx: RunSlashCommand<'_>) -> Result<bool> {
+    let RunSlashCommand {
+        input,
+        agent,
+        session_id,
+        agent_instance_id,
+        max_iterations,
+        provider,
+        model,
+        verbosity,
+        effort,
+    } = ctx;
+    if !input.starts_with('/') {
+        return Ok(false);
+    }
+
+    let (command, args) = split_run_slash_input(input);
+    if command == "/model" && args.is_empty() {
+        print_run_model_slash_command(provider, model);
+    } else if command == "/model" {
+        print_run_model_switch_slash_command(input, args, provider, model);
+    } else if command == "/usage" {
+        print_run_usage_slash_command(input, args);
+    } else if command == "/verbose" {
+        print_run_verbose_slash_command(input, args, verbosity);
+    } else if command == "/effort" {
+        print_run_effort_slash_command(input, args, effort);
+    } else if command == "/continue" {
+        print_run_continue_slash_command(input);
+    } else if command == "/pause" {
+        print_run_pause_slash_command(input);
+    } else if command == "/resume" {
+        print_run_resume_slash_command(input);
+    } else if command == "/activity" && args.is_empty() {
+        print_run_activity_slash_command(input);
+    } else if command == "/log" && args.is_empty() {
+        print_run_log_slash_command(input);
+    } else if command == "/compact" {
+        print_run_compact_slash_command(input);
+    } else if command == "/session" {
+        print_run_session_slash_command(input, args);
+    } else if command == "/agent" {
+        print_run_agent_slash_command(
+            input,
+            args,
+            agent,
+            agent_instance_id,
+            session_id,
+            max_iterations,
+        );
+    } else if command == "/status" {
+        print_run_status_slash_command(input, agent_instance_id, max_iterations);
+    } else if command == "/task" {
+        print_run_task_slash_command(input, args);
+    } else if command == "/allow-path" {
+        print_run_allow_path_slash_command(input, args);
+    } else if command == "/capture" {
+        print_run_capture_slash_command(input, args);
+    } else if command == "/sandbox" {
+        print_run_sandbox_slash_command(input);
+    } else if command == "/scrollback" {
+        print_run_scrollback_slash_command(input, args);
+    } else if command == "/popup" {
+        print_run_popup_slash_command(input, args);
+    } else if command == "/mcp" {
+        print_run_mcp_slash_command(input, args);
+    } else if command == "/config" {
+        print_run_config_slash_command(input, args);
+    } else if let Some(block) = run_static_slash_command_block(command) {
+        print_run_static_slash_command(input, block);
+    } else {
+        println!("\x1b[1;93mUnknown command: {}\x1b[0m", input);
+    }
+    print_run_prompt()?;
+    Ok(true)
+}
+
+fn print_run_prompt() -> Result<()> {
+    print!(
+        "{}{}{}3G",
+        by_tui::ansi_style("> ", &[by_tui::ANSI_BOLD, by_tui::ANSI_BRIGHT_CYAN], true),
+        by_tui::ansi_style(
+            "Alt+Enter: newline, /help for commands",
+            &[by_tui::ANSI_DIM],
+            true,
+        ),
+        by_tui::ANSI_ESC,
+    );
+    io::stdout().flush()?;
+    Ok(())
+}
+
+fn resolve_run_interactive_model_or_exit(provider: &str, model: Option<&str>) -> String {
+    match provider {
+        "openai" => {
+            exit_clojure_no_api_key_if_missing(provider, "OPENAI_API_KEY");
+            model.unwrap_or("gpt-4.1-mini").to_string()
+        }
+        "anthropic" => {
+            exit_clojure_no_api_key_if_missing(provider, "ANTHROPIC_API_KEY");
+            model.unwrap_or("claude-opus-4-7").to_string()
+        }
+        "claude-code" => model.unwrap_or("opus").to_string(),
+        "ollama" => model.unwrap_or("glm-5:cloud").to_string(),
+        "apple-fm" => model.unwrap_or("apple-foundationmodel").to_string(),
+        "bedrock" => match model {
+            Some(value) => value.to_string(),
+            None => exit_clojure_null_bedrock_model_error(),
+        },
+        _ => model.unwrap_or(provider).to_string(),
+    }
+}
+
+fn exit_clojure_no_api_key_if_missing(provider: &str, env_var: &str) {
+    if std::env::var_os(env_var).is_some() {
+        return;
+    }
+
+    let message = format!("No API key for {provider}. Set {env_var} env var");
+    eprintln!("** ERROR: **");
+    eprintln!("Exception: #error {{");
+    eprintln!(" :cause {message}");
+    eprintln!(" :data {{:provider :{provider}}}");
+    eprintln!(" :via");
+    eprintln!(" [{{:type clojure.lang.ExceptionInfo");
+    eprintln!("   :message {message}");
+    eprintln!("   :data {{:provider :{provider}}}}}]");
+    eprintln!("}}");
+    std::process::exit(255);
+}
+
+fn exit_clojure_null_bedrock_model_error() -> ! {
+    let message =
+        "Cannot invoke \"String.contains(java.lang.CharSequence)\" because \"model\" is null";
+    eprintln!("** ERROR: **");
+    eprintln!("Exception: #error {{");
+    eprintln!(" :cause {message}");
+    eprintln!(" :via");
+    eprintln!(" [{{:type java.lang.NullPointerException");
+    eprintln!("   :message {message}}}]");
+    eprintln!("}}");
+    std::process::exit(255);
+}
 fn print_tui_snapshot(agent: String, model: String, rows: usize, cols: usize) -> Result<()> {
     let frame = by_tui::StaticFrame {
         rows,

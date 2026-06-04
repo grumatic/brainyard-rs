@@ -111,21 +111,21 @@ fn top_help_matches_clojure_command_surface() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("NAME:\n by - Brainyard Agent CLI"))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains("NAME:\n by - Brainyard Agent CLI"))
+        .stderr(predicate::str::contains(
             "USAGE:\n by [global-options] command [command options] [arguments...]",
         ))
-        .stdout(predicate::str::contains("VERSION:"))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains("VERSION:"))
+        .stderr(predicate::str::contains(
             "run                  Start interactive TUI agent session (default)",
         ))
-        .stdout(predicate::str::contains("agents"))
-        .stdout(predicate::str::contains("models"))
-        .stdout(predicate::str::contains("sessions"))
-        .stdout(predicate::str::contains("tools").not())
-        .stdout(predicate::str::contains("memory").not())
-        .stdout(predicate::str::contains("mcp").not())
-        .stdout(predicate::str::contains("tui").not());
+        .stderr(predicate::str::contains("agents"))
+        .stderr(predicate::str::contains("models"))
+        .stderr(predicate::str::contains("sessions"))
+        .stderr(predicate::str::contains("tools").not())
+        .stderr(predicate::str::contains("memory").not())
+        .stderr(predicate::str::contains("mcp").not())
+        .stderr(predicate::str::contains("tui").not());
 }
 
 #[test]
@@ -162,13 +162,13 @@ fn run_help_matches_clojure_command_surface() {
         .args(["run", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by run - Start interactive TUI agent session (default)",
         ))
-        .stdout(predicate::str::contains("-u, --user-id S"))
-        .stdout(predicate::str::contains("--[no-]inline"))
-        .stdout(predicate::str::contains("--[no-]with-tmux"))
-        .stdout(predicate::str::contains("--[no-]select-resume"));
+        .stderr(predicate::str::contains("-u, --user-id S"))
+        .stderr(predicate::str::contains("--[no-]inline"))
+        .stderr(predicate::str::contains("--[no-]with-tmux"))
+        .stderr(predicate::str::contains("--[no-]select-resume"));
 }
 
 #[test]
@@ -181,10 +181,10 @@ fn no_args_defaults_to_run_command() {
         .env("BRAINYARD_SESSION_ID", "agt-default")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("agent coact-agent"))
-        .stdout(predicate::str::contains("model claude-code"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("coact-agent"))
+        .stdout(predicate::str::contains("claude-code/opus"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::is_empty());
 
     let meta = read_session_meta(home.path(), "agt-default");
@@ -193,6 +193,48 @@ fn no_args_defaults_to_run_command() {
     assert!(meta.contains(":defagent-id :coact-agent"));
     assert!(meta.contains(":started-at "));
     assert!(meta.contains(":last-attached-at "));
+}
+
+#[test]
+fn run_loop_reads_until_quit_command() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-loop-quit")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin("/quit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("TUI session ended."))
+        .stderr(predicate::str::is_empty());
+
+    let meta = read_session_meta(home.path(), "agt-run-loop-quit");
+    assert!(meta.contains(":agent-id :coact-agent"));
+}
+
+#[test]
+fn run_loop_processes_input_before_quit_command() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-loop-input")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "-p", "ollama"])
+        .write_stdin("hello\n/quit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("ollama/glm-5:cloud"))
+        .stdout(predicate::str::contains("TUI session ended."))
+        .stderr(predicate::str::contains(
+            "currently supports provider 'bedrock' only",
+        ));
 }
 
 #[test]
@@ -227,12 +269,10 @@ fn root_level_run_flags_are_routed_to_run_command() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("agent coact-agent"))
-        .stdout(predicate::str::contains(
-            "model bedrock:amazon.nova-lite-v1:0",
-        ))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("coact-agent"))
+        .stdout(predicate::str::contains("bedrock/amazon.nova-lite-v1:0"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("unexpected argument").not())
         .stderr(predicate::str::is_empty());
 
@@ -254,9 +294,9 @@ fn bare_agent_id_is_routed_to_run_command() {
         .arg("coact-agent")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("agent coact-agent"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("coact-agent"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("unrecognized subcommand").not())
         .stderr(predicate::str::is_empty());
 
@@ -277,8 +317,8 @@ fn run_accepts_bare_resume_flag_like_clojure() {
         .args(["run", "--resume"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("a value is required").not())
         .stderr(predicate::str::is_empty());
 
@@ -320,8 +360,8 @@ fn run_explicit_existing_resume_reaches_preview_tui() {
         .args(["run", "--resume", "alpha"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("resume alpha"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("session alpha"))
         .stderr(predicate::str::contains("no persisted session named").not())
         .stderr(predicate::str::is_empty());
 
@@ -349,8 +389,8 @@ fn run_explicit_resume_uses_session_dir_when_meta_id_is_stale() {
         .args(["run", "--resume", "alpha"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("resume alpha"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("session alpha"))
         .stderr(predicate::str::contains("no persisted session named").not())
         .stderr(predicate::str::is_empty());
 
@@ -389,7 +429,7 @@ fn run_explicit_resume_preview_reports_persisted_message_count() {
         .args(["run", "--resume", "alpha"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("resume alpha · 2 messages"))
+        .stdout(predicate::str::contains("session alpha"))
         .stderr(predicate::str::is_empty());
 }
 
@@ -404,8 +444,8 @@ fn run_select_resume_without_sessions_reaches_preview_tui_without_prompt() {
         .args(["run", "--select-resume"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("no persisted session named").not())
         .stderr(predicate::str::is_empty());
 
@@ -426,8 +466,8 @@ fn run_select_resume_takes_precedence_over_explicit_missing_resume() {
         .args(["run", "--select-resume", "--resume", "missing"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("no persisted session named").not())
         .stderr(predicate::str::is_empty());
 
@@ -575,8 +615,8 @@ fn run_with_tmux_live_server_reaches_preview_tui() {
         .args(["run", "--with-tmux"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("You passed --with-tmux").not())
         .stderr(predicate::str::is_empty());
 
@@ -600,8 +640,8 @@ fn run_no_with_tmux_does_not_trigger_tmux_preflight() {
         .args(["run", "--no-with-tmux"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Brainyard by-rs"))
-        .stdout(predicate::str::contains("preview"))
+        .stdout(predicate::str::contains("Brainyard TUI"))
+        .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains("You passed --with-tmux").not())
         .stderr(predicate::str::is_empty());
 
@@ -1351,13 +1391,13 @@ fn agents_help_matches_clojure_command_surface() {
         .args(["agents", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by agents - List available agents",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "USAGE:\n by agents [command options] [arguments...]",
         ))
-        .stdout(predicate::str::contains("--fixture").not());
+        .stderr(predicate::str::contains("--fixture").not());
 }
 
 #[test]
@@ -1466,13 +1506,13 @@ fn models_help_matches_clojure_command_surface() {
         .args(["models", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by models - List available LLM models (provider/model)",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "-p, --provider S  Filter to a single provider",
         ))
-        .stdout(predicate::str::contains("--fixture").not());
+        .stderr(predicate::str::contains("--fixture").not());
 }
 
 #[test]
@@ -1519,16 +1559,16 @@ fn sessions_help_matches_clojure_command_surface() {
         .args(["sessions", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by sessions - List or prune persisted agent sessions",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "USAGE:\n by sessions [global-options] command [command options] [arguments...]",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "list                 List all persisted sessions",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "prune                Delete a persisted session",
         ));
 }
@@ -1540,13 +1580,13 @@ fn sessions_list_help_matches_clojure_command_surface() {
         .args(["sessions", "list", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by sessions list - List all persisted sessions",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "USAGE:\n by sessions list [command options] [arguments...]",
         ))
-        .stdout(predicate::str::contains("--root").not());
+        .stderr(predicate::str::contains("--root").not());
 }
 
 #[test]
@@ -1556,11 +1596,11 @@ fn sessions_prune_help_matches_clojure_command_surface() {
         .args(["sessions", "prune", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by sessions prune - Delete a persisted session",
         ))
-        .stdout(predicate::str::contains("-s, --session-id S  Session ID"))
-        .stdout(predicate::str::contains("--root").not());
+        .stderr(predicate::str::contains("-s, --session-id S  Session ID"))
+        .stderr(predicate::str::contains("--root").not());
 }
 
 #[test]
@@ -3425,16 +3465,16 @@ fn config_help_matches_clojure_bootstrap_surface() {
         .args(["config", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by config - Bootstrap pipeline (detect → ladder → handoff)",
         ))
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "USAGE:\n by config [command options] [arguments...]",
         ))
-        .stdout(predicate::str::contains("--[no-]auto"))
-        .stdout(predicate::str::contains("--profile S"))
-        .stdout(predicate::str::contains("--[no-]dry-run"))
-        .stdout(predicate::str::contains("show").not());
+        .stderr(predicate::str::contains("--[no-]auto"))
+        .stderr(predicate::str::contains("--profile S"))
+        .stderr(predicate::str::contains("--[no-]dry-run"))
+        .stderr(predicate::str::contains("show").not());
 }
 
 #[test]
@@ -14551,15 +14591,15 @@ fn ask_help_matches_clojure_command_surface() {
         .args(["ask", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
+        .stderr(predicate::str::contains(
             "NAME:\n by ask - Ask a one-shot question (non-interactive)",
         ))
-        .stdout(predicate::str::contains("coact-agent  Agent ID"))
-        .stdout(predicate::str::contains("claude-code  LM provider"))
-        .stdout(predicate::str::contains("-u, --user-id S"))
-        .stdout(predicate::str::contains("--dry-run").not())
-        .stdout(predicate::str::contains("--live").not())
-        .stdout(predicate::str::contains("--fixture-response").not());
+        .stderr(predicate::str::contains("coact-agent  Agent ID"))
+        .stderr(predicate::str::contains("claude-code  LM provider"))
+        .stderr(predicate::str::contains("-u, --user-id S"))
+        .stderr(predicate::str::contains("--dry-run").not())
+        .stderr(predicate::str::contains("--live").not())
+        .stderr(predicate::str::contains("--fixture-response").not());
 }
 
 #[test]
