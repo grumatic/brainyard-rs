@@ -221,6 +221,33 @@ fn run_loop_reads_until_quit_command() {
 }
 
 #[test]
+fn run_config_slash_lists_runtime_config() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_PROJECT_DIR", project.path())
+        .env("BRAINYARD_SESSION_ID", "agt-config-list")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin("/config\n/quit\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("Runtime Config"));
+    assert!(stdout.contains("acp-backend"));
+    assert!(stdout.contains("max-iterations"));
+    assert!(stdout.contains("show-llm-streaming"));
+    assert!(stdout.contains("working-dir"));
+    assert!(!stdout.contains("not available in by-rs yet"));
+}
+
+#[test]
 fn run_with_closed_stdin_stays_alive_like_tui() {
     let home = tempfile::tempdir().unwrap();
     let binary = assert_cmd::cargo::cargo_bin("by-rs");

@@ -38171,10 +38171,222 @@ fn print_run_config_value(key: &str, value: &str, kind: &str) {
     println!("  \x1b[1m\x1b[97m{key}\x1b[0m = \x1b[96m{value}\x1b[0m\x1b[2m  ({kind})\x1b[0m");
 }
 
+fn print_run_config_listing() {
+    let snapshot = run_runtime_config_snapshot_json();
+    let config = snapshot.as_object();
+    let defaults = agent_runtime_default_config_json();
+    let default_config = defaults.as_object();
+
+    println!("\x1b[1;97mRuntime Config\x1b[0m");
+    for key in RUN_CONFIG_KEYS
+        .split(',')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+    {
+        let value = config.and_then(|config| config.get(key));
+        let default = default_config.and_then(|config| config.get(key));
+        let changed = run_config_value_changed(value, default);
+        let kind = run_config_value_kind(key, value);
+        let rendered = run_config_value_display(key, value, kind);
+        let annotation = run_config_value_annotation(kind, changed, default);
+        let value_style = if changed { "\x1b[96m" } else { "\x1b[2m" };
+        println!(
+            "  \x1b[1m\x1b[97m{key:<30}\x1b[0m{value_style}{rendered:<8}\x1b[0m\x1b[2m    ({annotation})\x1b[0m"
+        );
+    }
+}
+
+fn run_runtime_config_snapshot_json() -> serde_json::Value {
+    let persisted = read_process_runtime_config_json().unwrap_or_else(|_| serde_json::json!({}));
+    let mut snapshot = agent_runtime_config_snapshot_json(&persisted);
+
+    if let (Some(config), Some(dirs)) = (snapshot.as_object_mut(), process_dirs()) {
+        let user_dir = system_user_home_dir().or(dirs.user_dir);
+        config.insert(
+            "dirs".to_string(),
+            serde_json::json!({
+                "user-dir": user_dir.as_ref().map(|path| path.to_string_lossy().into_owned()),
+                "project-dir": dirs.project_dir.to_string_lossy().into_owned(),
+                "working-dir": dirs.working_dir.to_string_lossy().into_owned(),
+            }),
+        );
+        config.insert(
+            "working-dir".to_string(),
+            serde_json::Value::String(dirs.working_dir.to_string_lossy().into_owned()),
+        );
+        config.insert(
+            "enable-memory-capture".to_string(),
+            serde_json::Value::Bool(true),
+        );
+    }
+
+    snapshot
+}
+
+fn read_process_runtime_config_json() -> Result<serde_json::Value> {
+    let Some(path) = default_config_path() else {
+        return Ok(serde_json::json!({}));
+    };
+    if !path.is_file() {
+        return Ok(serde_json::json!({}));
+    }
+
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read config {}", path.display()))?;
+    match by_contracts::parse_value(&raw)
+        .with_context(|| format!("failed to parse config {}", path.display()))?
+    {
+        by_contracts::EdnValue::Map(map) => Ok(edn_map_to_json(&map)),
+        _ => Ok(serde_json::json!({})),
+    }
+}
+
+fn run_config_value_kind(key: &str, value: Option<&serde_json::Value>) -> &'static str {
+    config_schema_type(key).unwrap_or_else(|| match value {
+        Some(serde_json::Value::Bool(_)) => "boolean",
+        Some(serde_json::Value::Number(number)) if number.is_f64() => "number",
+        Some(serde_json::Value::Number(_)) => "integer",
+        Some(serde_json::Value::Array(_)) => "array",
+        Some(serde_json::Value::Object(_)) => "object",
+        Some(serde_json::Value::String(_)) | Some(serde_json::Value::Null) | None => "string",
+    })
+}
+
+fn run_config_value_changed(
+    value: Option<&serde_json::Value>,
+    default: Option<&serde_json::Value>,
+) -> bool {
+    match (value, default) {
+        (Some(value), Some(default)) => value != default,
+        (Some(serde_json::Value::Null), None) | (None, None) => false,
+        (Some(_), None) => true,
+        (None, Some(serde_json::Value::Null)) => false,
+        (None, Some(_)) => true,
+    }
+}
+
+fn run_config_value_annotation(
+    kind: &str,
+    changed: bool,
+    default: Option<&serde_json::Value>,
+) -> String {
+    if changed {
+        format!("{kind}, default: {}", run_config_default_display(default))
+    } else {
+        kind.to_string()
+    }
+}
+
+fn run_config_default_display(value: Option<&serde_json::Value>) -> String {
+    match value {
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(serde_json::Value::String(value)) => value.clone(),
+        Some(serde_json::Value::Bool(value)) => value.to_string(),
+        Some(serde_json::Value::Number(value)) => value.to_string(),
+        Some(serde_json::Value::Array(values)) if values.is_empty() => "[]".to_string(),
+        Some(serde_json::Value::Object(values)) if values.is_empty() => "{}".to_string(),
+        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+    }
+}
+
+fn run_config_value_display(key: &str, value: Option<&serde_json::Value>, kind: &str) -> String {
+    match value {
+        Some(serde_json::Value::Null) | None => String::new(),
+        Some(serde_json::Value::String(value)) if kind == "keyword" && value.starts_with(':') => {
+            value.clone()
+        }
+        Some(serde_json::Value::String(value)) if kind == "keyword" => format!(":{value}"),
+        Some(serde_json::Value::String(value)) => value.clone(),
+        Some(serde_json::Value::Bool(value)) => value.to_string(),
+        Some(serde_json::Value::Number(value)) => value.to_string(),
+        Some(serde_json::Value::Array(values)) if values.is_empty() && kind == "array" => {
+            String::new()
+        }
+        Some(serde_json::Value::Array(values)) if values.is_empty() => "[]".to_string(),
+        Some(serde_json::Value::Object(object)) if key == "dirs" => run_config_dirs_display(object),
+        Some(serde_json::Value::Object(object)) if object.is_empty() => "{}".to_string(),
+        Some(other) => serde_json::to_string(other).unwrap_or_else(|_| other.to_string()),
+    }
+}
+
+fn run_config_dirs_display(object: &serde_json::Map<String, serde_json::Value>) -> String {
+    let mut entries = Vec::new();
+    for key in ["user-dir", "project-dir", "working-dir"] {
+        if let Some(serde_json::Value::String(value)) = object.get(key) {
+            entries.push(format!(":{key} {value:?}"));
+        }
+    }
+    format!("{{{}}}", entries.join(", "))
+}
+
+#[cfg(unix)]
+fn system_user_home_dir() -> Option<PathBuf> {
+    let user = command_stdout("id", &["-un"])?;
+    system_home_dir_for_user(&user)
+}
+
+#[cfg(not(unix))]
+fn system_user_home_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(PathBuf::from)
+}
+
+#[cfg(target_os = "macos")]
+fn system_home_dir_for_user(user: &str) -> Option<PathBuf> {
+    let record = format!("/Users/{user}");
+    let output = command_stdout("dscl", &[".", "-read", &record, "NFSHomeDirectory"])?;
+    output.lines().find_map(|line| {
+        line.strip_prefix("NFSHomeDirectory:")
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn system_home_dir_for_user(user: &str) -> Option<PathBuf> {
+    command_stdout("getent", &["passwd", user])
+        .and_then(|entry| passwd_home_dir(&entry))
+        .or_else(|| {
+            std::fs::read_to_string("/etc/passwd")
+                .ok()
+                .and_then(|passwd| {
+                    passwd
+                        .lines()
+                        .find(|line| line.split(':').next() == Some(user))
+                        .and_then(passwd_home_dir)
+                })
+        })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn passwd_home_dir(entry: &str) -> Option<PathBuf> {
+    entry
+        .split(':')
+        .nth(5)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(unix)]
+fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let output = ProcessCommand::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8(output.stdout).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn print_run_config_slash_command(input: &str, args: &str) {
     print_run_command_header(input);
     if args.is_empty() {
-        print_run_warning_line("/config listing is not available in by-rs yet.");
+        print_run_config_listing();
         return;
     }
 
@@ -38182,6 +38394,13 @@ fn print_run_config_slash_command(input: &str, args: &str) {
     match key {
         "max-iterations" => print_run_config_value("max-iterations", "100", "integer"),
         "show-llm-streaming" => print_run_config_value("show-llm-streaming", "false", "boolean"),
+        _ if config_schema_type(key).is_some() => {
+            let snapshot = run_runtime_config_snapshot_json();
+            let value = snapshot.as_object().and_then(|config| config.get(key));
+            let kind = run_config_value_kind(key, value);
+            let rendered = run_config_value_display(key, value, kind);
+            print_run_config_value(key, &rendered, kind);
+        }
         _ => print_run_warning_line(&format!(
             "Unknown config key: {key}. Valid: {RUN_CONFIG_KEYS}"
         )),
