@@ -37978,7 +37978,7 @@ struct RunInitListSnapshotsOptions {
 fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOptions {
     let parsed = parse_run_init_flags(args);
     let mut scope = parsed.scope.unwrap_or_else(|| "both".to_string());
-    let mut limit = 20;
+    let mut limit = 10;
     let mut tokens = parsed.rest.split_whitespace();
     if !matches!(tokens.next(), Some("list-snapshots")) {
         return RunInitListSnapshotsOptions { scope, limit };

@@ -270,6 +270,46 @@ fn run_init_list_snapshots_scope_before_subcommand_matches_oracle() {
 }
 
 #[test]
+fn run_init_list_snapshots_default_limit_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_many_init_snapshots_fixture(oracle_home.path(), 11);
+    write_many_init_snapshots_fixture(rust_home.path(), 11);
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        "/init list-snapshots\n/quit\n",
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        "/init list-snapshots\n/quit\n",
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for /init list-snapshots default limit"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for /init list-snapshots default limit"
+    );
+}
+
+#[test]
 fn run_init_revert_missing_arg_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
@@ -370,6 +410,16 @@ fn write_init_list_snapshots_fixture(home: &Path) {
         "# Old\n",
     )
     .expect("write older snapshot");
+}
+
+fn write_many_init_snapshots_fixture(home: &Path, count: usize) {
+    let snapshot_dir = home.join(".brainyard/agents/init-agent/snapshots");
+    std::fs::create_dir_all(&snapshot_dir).expect("create init snapshot dir");
+    for index in 1..=count {
+        let filename = format!("202601{:02}-030405-project-snapshot-{:02}.md", index, index);
+        std::fs::write(snapshot_dir.join(filename), format!("# Snapshot {index}\n"))
+            .expect("write init snapshot");
+    }
 }
 
 #[test]
