@@ -28,6 +28,12 @@ print(os.pathsep.join(parts))
 PY
 )"
 
+java_user_home_args=()
+if [[ -n "${BY_RS_ORACLE_USER_HOME:-}" ]]; then
+  java_user_home_args+=("-Duser.home=${BY_RS_ORACLE_USER_HOME}")
+fi
+
 exec java --enable-native-access=ALL-UNNAMED \
+  "${java_user_home_args[@]}" \
   -cp "${absolute_classpath}" \
   clojure.main -m ai.brainyard.agent-tui-app.main "$@"

@@ -51,6 +51,36 @@ fn models_positional_provider_matches_oracle() {
 }
 
 #[test]
+fn sessions_list_fixture_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_session_list_fixture(oracle_home.path());
+    write_session_list_fixture(rust_home.path());
+
+    let expected =
+        run_command_with_oracle_user_home(&oracle, ["sessions", "list"], "", oracle_home.path());
+    let by_rs = by_rs_binary();
+    let actual = run_command(&by_rs, ["sessions", "list"], "", rust_home.path());
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, rust_home.path(), rust_home.path()),
+        "stdout mismatch for sessions list"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, rust_home.path(), rust_home.path()),
+        "stderr mismatch for sessions list"
+    );
+}
+
+#[test]
 fn run_quit_contract_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
@@ -837,6 +867,21 @@ fn run_provider_setup_errors_match_oracle_contract() {
     }
 }
 
+fn write_session_list_fixture(home: &Path) {
+    let session_dir = home.join(".brainyard/sessions/alpha");
+    std::fs::create_dir_all(&session_dir).expect("create session fixture");
+    std::fs::write(
+        session_dir.join("meta.edn"),
+        r#"{:id "alpha" :label "alpha-label" :defagent-id :coact-agent :started-at 1767225600000 :last-attached-at 1767225900000}"#,
+    )
+    .expect("write session meta fixture");
+    std::fs::write(
+        session_dir.join("messages.log"),
+        r#"{:t 1 :kind :message :payload {:role "user" :content "Hi"}}"#,
+    )
+    .expect("write session message fixture");
+}
+
 fn parity_command_lock() -> MutexGuard<'static, ()> {
     match PARITY_COMMAND_LOCK.lock() {
         Ok(guard) => guard,
@@ -935,7 +980,35 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut child = Command::new(binary)
+    run_command_with_optional_oracle_user_home(binary, args, stdin, home, None)
+}
+
+fn run_command_with_oracle_user_home<I, S>(
+    binary: &Path,
+    args: I,
+    stdin: &str,
+    home: &Path,
+) -> CommandResult
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    run_command_with_optional_oracle_user_home(binary, args, stdin, home, Some(home))
+}
+
+fn run_command_with_optional_oracle_user_home<I, S>(
+    binary: &Path,
+    args: I,
+    stdin: &str,
+    home: &Path,
+    oracle_user_home: Option<&Path>,
+) -> CommandResult
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = Command::new(binary);
+    command
         .args(args)
         .env_clear()
         .env("HOME", home)
@@ -948,9 +1021,12 @@ where
         .current_dir(home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn parity command");
+        .stderr(Stdio::piped());
+    if let Some(oracle_user_home) = oracle_user_home {
+        command.env("BY_RS_ORACLE_USER_HOME", oracle_user_home);
+    }
+
+    let mut child = command.spawn().expect("spawn parity command");
 
     let mut stdout = child.stdout.take().expect("capture command stdout");
     let mut stderr = child.stderr.take().expect("capture command stderr");
@@ -983,10 +1059,10 @@ where
     let mut stderr_bytes = Vec::new();
     stdout
         .read_to_end(&mut stdout_bytes)
-        .expect("read command stdout");
+        .expect("read parity stdout");
     stderr
         .read_to_end(&mut stderr_bytes)
-        .expect("read command stderr");
+        .expect("read parity stderr");
 
     CommandResult {
         status_code: status.code(),
