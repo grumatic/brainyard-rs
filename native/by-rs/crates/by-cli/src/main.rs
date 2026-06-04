@@ -140,7 +140,7 @@ enum Commands {
         #[arg(value_name = "ARG", num_args = 0..)]
         positional: Vec<String>,
     },
-    /// Ask a one-shot question. Providers support dry-run shaping or fixture replay; live calls are Bedrock-only for now.
+    /// Ask a one-shot question. Providers support dry-run shaping or fixture replay; default execution calls live providers.
     Ask {
         /// Agent ID. Dry-run metadata follows Clojure default-agent precedence.
         #[arg(long, short = 'a', default_value = "coact-agent", value_name = "ID")]
@@ -180,9 +180,6 @@ enum Commands {
         /// Print the provider request JSON without network access.
         #[arg(long)]
         dry_run: bool,
-        /// Call Bedrock Converse over the network.
-        #[arg(long)]
-        live: bool,
         /// Replay a provider response fixture without network access.
         #[arg(long = "fixture-response", value_name = "PATH", hide = true)]
         fixture_response: Option<PathBuf>,
@@ -5364,7 +5361,6 @@ fn run() -> Result<()> {
             max_tokens,
             no_prompt_cache,
             dry_run,
-            live,
             fixture_response,
             question,
         } => print_ask(AskRequest {
@@ -5379,7 +5375,6 @@ fn run() -> Result<()> {
             max_tokens,
             no_prompt_cache,
             dry_run,
-            live,
             fixture_response,
             question,
         }),
@@ -8081,7 +8076,6 @@ struct AskRequest {
     max_tokens: Option<u32>,
     no_prompt_cache: bool,
     dry_run: bool,
-    live: bool,
     fixture_response: Option<PathBuf>,
     question: Vec<String>,
 }
@@ -8825,15 +8819,10 @@ fn print_ask(args: AskRequest) -> Result<()> {
         print_missing_ask_question_and_exit();
     };
 
-    if args.dry_run && args.live {
-        bail!("choose only one of --dry-run or --live");
+    if args.fixture_response.is_some() && args.dry_run {
+        bail!("choose only one of --dry-run or --fixture-response");
     }
-    if args.fixture_response.is_some() && (args.dry_run || args.live) {
-        bail!("choose only one of --dry-run, --live, or --fixture-response");
-    }
-    if !args.dry_run && !args.live && args.fixture_response.is_none() {
-        bail!("by-rs ask requires --dry-run or --live");
-    }
+    let live_requested = !args.dry_run && args.fixture_response.is_none();
 
     let default_config = read_default_config()?;
     let llm_config = default_config.as_ref().map(by_config::ConfigDocument::llm);
@@ -8854,13 +8843,17 @@ fn print_ask(args: AskRequest) -> Result<()> {
             .unwrap_or(provider),
         _ => provider,
     };
-    let model = model
-        .or_else(|| {
-            llm_config
-                .as_ref()
-                .and_then(|config| config.default_model.clone())
-        })
-        .context("--model is required for ask")?;
+    let model = if live_requested {
+        resolve_run_interactive_model_or_exit(&resolved_provider, model.as_deref())
+    } else {
+        model
+            .or_else(|| {
+                llm_config
+                    .as_ref()
+                    .and_then(|config| config.default_model.clone())
+            })
+            .context("--model is required for ask")?
+    };
 
     if let Some(path) = args.fixture_response {
         let raw: serde_json::Value = serde_json::from_str(

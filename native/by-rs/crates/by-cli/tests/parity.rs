@@ -867,6 +867,16 @@ fn run_provider_setup_errors_match_oracle_contract() {
     }
 }
 
+#[test]
+fn ask_default_setup_error_matches_oracle_contract() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    assert_ask_default_setup_error_matches_oracle(&oracle);
+}
+
 fn write_session_list_fixture(home: &Path) {
     let session_dir = home.join(".brainyard/sessions/alpha");
     std::fs::create_dir_all(&session_dir).expect("create session fixture");
@@ -947,6 +957,34 @@ fn assert_run_setup_error_matches_oracle(oracle: &Path, provider: &str) {
     assert!(
         actual.stderr.contains("** ERROR: **"),
         "by-rs must keep the Clojure fatal-error header for provider {provider}: {actual:?}",
+    );
+}
+
+fn assert_ask_default_setup_error_matches_oracle(oracle: &Path) {
+    let args = ["ask", "-p", "bedrock", "hello"];
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+
+    let expected = run_command(oracle, args, "", oracle_home.path());
+    let by_rs = by_rs_binary();
+    let actual = run_command(&by_rs, args, "", rust_home.path());
+
+    assert_eq!(
+        expected.status_code, actual.status_code,
+        "status mismatch for ask default setup error: expected {expected:?}, actual {actual:?}",
+    );
+    assert_eq!(
+        expected.timed_out, actual.timed_out,
+        "timeout mismatch for ask default setup error",
+    );
+    assert_eq!(
+        stderr_cause(&expected.stderr),
+        stderr_cause(&actual.stderr),
+        "stderr cause mismatch for ask default setup error: expected {expected:?}, actual {actual:?}",
+    );
+    assert!(
+        actual.stderr.contains("** ERROR: **"),
+        "by-rs must keep the Clojure fatal-error header for ask default setup error: {actual:?}",
     );
 }
 

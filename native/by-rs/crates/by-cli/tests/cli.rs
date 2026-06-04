@@ -15031,26 +15031,21 @@ fn ask_fixture_response_rejects_other_execution_modes() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "choose only one of --dry-run, --live, or --fixture-response",
+            "choose only one of --dry-run or --fixture-response",
         ));
 }
 
 #[test]
-fn ask_requires_explicit_dry_run_or_live_mode() {
+fn ask_default_bedrock_without_model_matches_clojure_setup_error() {
     Command::cargo_bin("by-rs")
         .unwrap()
-        .args([
-            "ask",
-            "--provider",
-            "bedrock",
-            "--model",
-            "amazon.nova-lite-v1:0",
-            "What is 2+2?",
-        ])
+        .env("BY_NO_DOTENV", "1")
+        .args(["ask", "--provider", "bedrock", "What is 2+2?"])
         .assert()
-        .failure()
+        .code(255)
+        .stderr(predicate::str::contains("** ERROR: **"))
         .stderr(predicate::str::contains(
-            "by-rs ask requires --dry-run or --live",
+            "Cannot invoke \"String.contains(java.lang.CharSequence)\" because \"model\" is null",
         ));
 }
 
@@ -15132,7 +15127,7 @@ fn ask_blank_question_matches_clojure_usage_error() {
 }
 
 #[test]
-fn ask_rejects_dry_run_and_live_together() {
+fn ask_live_flag_is_not_part_of_clojure_cli_surface() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .args([
@@ -15147,13 +15142,11 @@ fn ask_rejects_dry_run_and_live_together() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "choose only one of --dry-run or --live",
-        ));
+        .stderr(predicate::str::contains("unexpected argument '--live'"));
 }
 
 #[test]
-fn ask_live_rejects_non_bedrock_before_network() {
+fn ask_live_flag_is_rejected_before_provider_handling() {
     Command::cargo_bin("by-rs")
         .unwrap()
         .env("BY_NO_DOTENV", "1")
@@ -15168,9 +15161,7 @@ fn ask_live_rejects_non_bedrock_before_network() {
         ])
         .assert()
         .failure()
-        .stderr(predicate::str::contains(
-            "by-rs ask currently supports provider 'bedrock' only",
-        ));
+        .stderr(predicate::str::contains("unexpected argument '--live'"));
 }
 
 #[test]
