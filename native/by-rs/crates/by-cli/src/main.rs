@@ -37985,43 +37985,21 @@ struct RunInitListSnapshotsOptions {
 
 fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOptions {
     let parsed = parse_run_init_flags(args);
-    let mut scope = parsed.scope.unwrap_or_else(|| "both".to_string());
+    let scope = parsed.scope.unwrap_or_else(|| "both".to_string());
     let mut limit = 10;
     let mut tokens = parsed.rest.split_whitespace();
     if !matches!(tokens.next(), Some("list-snapshots")) {
         return RunInitListSnapshotsOptions { scope, limit };
     }
-    while let Some(token) = tokens.next() {
-        match token {
-            "--scope" | ":scope" => {
-                if let Some(value) = tokens.next() {
-                    scope = normalize_run_init_scope(value);
-                }
-            }
-            "--limit" | ":limit" => {
-                if let Some(value) = tokens.next().and_then(|value| value.parse::<usize>().ok()) {
-                    limit = value;
-                }
-            }
-            value if value.starts_with("--scope=") => {
-                scope = normalize_run_init_scope(value.trim_start_matches("--scope="));
-            }
-            value if value.starts_with(":scope=") => {
-                scope = normalize_run_init_scope(value.trim_start_matches(":scope="));
-            }
-            value if value.starts_with("--limit=") => {
-                if let Ok(value) = value.trim_start_matches("--limit=").parse::<usize>() {
-                    limit = value;
-                }
-            }
-            value if value.chars().all(|ch| ch.is_ascii_digit()) => {
-                if let Ok(value) = value.parse::<usize>() {
-                    limit = value;
-                }
-            }
-            _ => {}
+
+    let rest_args = tokens.collect::<Vec<_>>().join(" ");
+    let trimmed = rest_args.trim();
+    if !trimmed.is_empty() && trimmed.chars().all(|ch| ch.is_ascii_digit()) {
+        if let Ok(value) = trimmed.parse::<usize>() {
+            limit = value;
         }
     }
+
     RunInitListSnapshotsOptions { scope, limit }
 }
 

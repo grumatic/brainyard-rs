@@ -190,6 +190,46 @@ fn run_init_list_snapshots_non_empty_matches_oracle() {
 }
 
 #[test]
+fn run_init_list_snapshots_ignores_limit_option_like_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_many_init_snapshots_fixture(oracle_home.path(), 2);
+    write_many_init_snapshots_fixture(rust_home.path(), 2);
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        "/init list-snapshots --limit 1\n/quit\n",
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        "/init list-snapshots --limit 1\n/quit\n",
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for /init list-snapshots --limit 1"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for /init list-snapshots --limit 1"
+    );
+}
+
+#[test]
 fn run_init_list_snapshots_positional_limit_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
