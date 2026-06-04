@@ -38076,7 +38076,7 @@ fn render_run_init_revert(args: &str) -> Result<String> {
         )
     })?;
     Ok(format!(
-        "{{:ok? true, :scope :{}, :restored-from {}, :pre-revert-snapshot {}, :dest {}}}",
+        "{{:ok? true,\n :scope :{},\n :restored-from\n {},\n :pre-revert-snapshot\n {},\n :dest\n {}}}\n",
         chosen.scope,
         edn_quote_string(&chosen.path.display().to_string()),
         edn_quote_string(&pre_snapshot.display().to_string()),

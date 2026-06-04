@@ -134,6 +134,60 @@ fn run_init_revert_missing_snapshot_matches_oracle() {
 }
 
 #[test]
+fn run_init_revert_success_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    let oracle_snapshot = write_init_revert_fixture(oracle_home.path());
+    let rust_snapshot = write_init_revert_fixture(rust_home.path());
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        &format!("/init revert {}\n/quit\n", oracle_snapshot.display()),
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        &format!("/init revert {}\n/quit\n", rust_snapshot.display()),
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for successful /init revert"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for successful /init revert"
+    );
+    assert_eq!(
+        std::fs::read_to_string(oracle_home.path().join(".brainyard/BRAINYARD.md")).unwrap(),
+        std::fs::read_to_string(rust_home.path().join(".brainyard/BRAINYARD.md")).unwrap()
+    );
+}
+
+fn write_init_revert_fixture(home: &Path) -> PathBuf {
+    let brainyard_dir = home.join(".brainyard");
+    let snapshot_dir = brainyard_dir.join("agents/init-agent/snapshots");
+    std::fs::create_dir_all(&snapshot_dir).expect("create init snapshot dir");
+    std::fs::write(brainyard_dir.join("BRAINYARD.md"), "# Current\n").expect("write current doc");
+    let snapshot = snapshot_dir.join("20260102-030405-project-test-snapshot.md");
+    std::fs::write(&snapshot, "# Restored\n").expect("write restore snapshot");
+    snapshot
+}
+
+#[test]
 fn run_help_command_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
@@ -560,7 +614,15 @@ fn normalize_output(output: &str, oracle_home: &Path, rust_home: &Path) -> Strin
     normalized = normalized.replace(&rust_home.display().to_string(), "$HOME");
     normalized = normalize_version_lines(&normalized);
     normalized = normalize_agent_instance_ids(&normalized);
+    normalized = normalize_init_snapshot_timestamps(&normalized);
     normalized
+}
+
+fn normalize_init_snapshot_timestamps(output: &str) -> String {
+    Regex::new(r"\d{8}-\d{6}-project-revert-test-snapshot\.md")
+        .expect("init snapshot timestamp regex")
+        .replace_all(output, "SNAPSHOT_TS-project-revert-test-snapshot.md")
+        .into_owned()
 }
 
 fn normalize_agent_instance_ids(output: &str) -> String {
