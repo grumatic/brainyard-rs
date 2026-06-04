@@ -110,6 +110,46 @@ fn run_init_list_snapshots_empty_matches_oracle() {
 }
 
 #[test]
+fn run_init_list_snapshots_non_empty_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_init_revert_fixture(oracle_home.path());
+    write_init_revert_fixture(rust_home.path());
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        "/init list-snapshots\n/quit\n",
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        "/init list-snapshots\n/quit\n",
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for non-empty /init list-snapshots"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for non-empty /init list-snapshots"
+    );
+}
+
+#[test]
 fn run_init_revert_missing_arg_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;

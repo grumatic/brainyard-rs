@@ -37989,7 +37989,7 @@ fn render_run_init_list_snapshots(args: &str) -> Result<String> {
         .enumerate()
         .map(|(index, record)| {
             format!(
-                "  {:2}. \x1b[97m{}\x1b[0m \x1b[96m{}\x1b[0m {}\x1b[2m  {} B  {}\x1b[0m",
+                "  {:2}. \x1b[97m{}\x1b[0m \x1b[96m{}\x1b[0m  {}\x1b[2m  {} B  {}\x1b[0m",
                 index + 1,
                 record.ts,
                 record.scope,
