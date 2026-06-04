@@ -37856,25 +37856,21 @@ fn parse_run_init_flags(args: &str) -> RunInitFlagArgs {
     let mut tokens = args.split_whitespace();
     while let Some(token) = tokens.next() {
         match token {
-            "--scope" | ":scope" => {
+            "--scope" => {
                 if let Some(value) = tokens.next() {
                     scope = Some(normalize_run_init_scope(value));
                 }
             }
-            "--diff" | ":diff" | "--reseed" | ":reseed" => {}
+            "--diff" | "--reseed" => {}
             value if value.starts_with("--scope=") => {
                 scope = Some(normalize_run_init_scope(
                     value.trim_start_matches("--scope="),
                 ));
             }
-            value if value.starts_with(":scope=") => {
-                scope = Some(normalize_run_init_scope(
-                    value.trim_start_matches(":scope="),
-                ));
-            }
             value => kept.push(value.to_string()),
         }
     }
+
     RunInitFlagArgs {
         scope,
         rest: kept.join(" "),
@@ -38006,8 +38002,7 @@ fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOpti
 fn render_run_init_list_snapshots(args: &str) -> Result<String> {
     let options = parse_run_init_list_snapshots_options(args);
     let scopes = init_doc_parse_scopes(&options.scope).map_err(anyhow::Error::msg)?;
-    let mut dirs = init_doc_dirs(None, None)?;
-    dirs.user_dir = system_user_home_dir().or(dirs.user_dir);
+    let dirs = init_doc_dirs(None, None)?;
     let mut records = Vec::new();
     for scope in scopes {
         if let Some(base) = init_doc_scope_dir(&dirs, &scope) {

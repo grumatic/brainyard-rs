@@ -190,6 +190,46 @@ fn run_init_list_snapshots_non_empty_matches_oracle() {
 }
 
 #[test]
+fn run_init_list_snapshots_keyword_scope_is_not_a_flag_like_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_mixed_init_snapshots_fixture(oracle_home.path());
+    write_mixed_init_snapshots_fixture(rust_home.path());
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        "/init list-snapshots :scope :project\n/quit\n",
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        "/init list-snapshots :scope :project\n/quit\n",
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for /init list-snapshots :scope :project"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for /init list-snapshots :scope :project"
+    );
+}
+
+#[test]
 fn run_init_list_snapshots_ignores_limit_option_like_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
@@ -512,6 +552,16 @@ fn write_many_init_snapshots_fixture(home: &Path, count: usize) {
     for index in 1..=count {
         let filename = format!("202601{:02}-030405-project-snapshot-{:02}.md", index, index);
         std::fs::write(snapshot_dir.join(filename), format!("# Snapshot {index}\n"))
+            .expect("write init snapshot");
+    }
+}
+
+fn write_mixed_init_snapshots_fixture(home: &Path) {
+    let snapshot_dir = home.join(".brainyard/agents/init-agent/snapshots");
+    std::fs::create_dir_all(&snapshot_dir).expect("create init snapshot dir");
+    for (scope, day) in [("project", "01"), ("user", "02")] {
+        let filename = format!("202601{day}-030405-{scope}-snapshot-{scope}.md");
+        std::fs::write(snapshot_dir.join(filename), format!("# {scope} snapshot\n"))
             .expect("write init snapshot");
     }
 }
@@ -939,8 +989,12 @@ where
 
 fn normalize_output(output: &str, oracle_home: &Path, rust_home: &Path) -> String {
     let mut normalized = output.replace("\r\n", "\n");
-    normalized = normalized.replace(&oracle_home.display().to_string(), "$HOME");
-    normalized = normalized.replace(&rust_home.display().to_string(), "$HOME");
+    for home in [oracle_home, rust_home] {
+        if let Ok(canonical_home) = home.canonicalize() {
+            normalized = normalized.replace(&canonical_home.display().to_string(), "$HOME");
+        }
+        normalized = normalized.replace(&home.display().to_string(), "$HOME");
+    }
     normalized = normalize_version_lines(&normalized);
     normalized = normalize_agent_instance_ids(&normalized);
     normalized = normalize_init_snapshot_timestamps(&normalized);
