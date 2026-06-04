@@ -37841,7 +37841,8 @@ fn run_help_args(args: &str) -> bool {
 }
 
 fn run_init_show_args(args: &str) -> bool {
-    matches!(args.split_whitespace().next(), Some("show" | "read"))
+    let parsed = parse_run_init_flags(args);
+    matches!(parsed.rest.split_whitespace().next(), Some("show" | "read"))
 }
 
 struct RunInitFlagArgs {
@@ -37913,17 +37914,22 @@ fn run_init_revert_snapshot_arg(args: &str) -> Option<&str> {
 
 fn print_run_init_show_slash_command(input: &str) {
     print_run_command_header(input);
-    match render_run_init_show() {
+    let (_command, args) = split_run_slash_input(input);
+    match render_run_init_show(args) {
         Ok(block) => println!("{block}"),
         Err(error) => print_run_warning_line(&format!("Init read error: {error}")),
     }
 }
 
-fn render_run_init_show() -> Result<String> {
+fn render_run_init_show(args: &str) -> Result<String> {
+    let parsed = parse_run_init_flags(args);
+    let scope = parsed.scope.unwrap_or_else(|| "both".to_string());
+    let scopes = init_doc_parse_scopes(&scope).map_err(anyhow::Error::msg)?;
+
     let mut dirs = init_doc_dirs(None, None)?;
     dirs.user_dir = system_user_home_dir().or(dirs.user_dir);
-    let blocks = ["project", "user"]
-        .into_iter()
+    let blocks = scopes
+        .iter()
         .map(|scope| render_run_init_show_scope(&dirs, scope))
         .collect::<Result<Vec<_>>>()?;
     Ok(blocks.join("\n"))
