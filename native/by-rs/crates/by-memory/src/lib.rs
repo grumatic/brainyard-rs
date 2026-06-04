@@ -304,6 +304,8 @@ struct MemoryAuditRow {
     created_at: Option<String>,
 }
 
+type MemoryAuditTurnSlot = (Option<String>, i64, Option<i64>, Vec<MemoryAuditRow>);
+
 pub fn search_memory(
     db_path: impl AsRef<Path>,
     request: MemorySearchRequest,
@@ -366,7 +368,7 @@ pub fn recall_memory(db_path: impl AsRef<Path>, request: MemoryRecallRequest) ->
             )?;
             Ok(memory_recall_report(
                 "l2",
-                recall_select_entries(entries, &RECALL_LAYER_KEYS),
+                recall_select_entries(entries, RECALL_LAYER_KEYS),
                 session_id,
                 normalized_match,
                 false,
@@ -384,7 +386,7 @@ pub fn recall_memory(db_path: impl AsRef<Path>, request: MemoryRecallRequest) ->
             )?;
             Ok(memory_recall_report(
                 "l3",
-                recall_select_entries(entries, &RECALL_LAYER_KEYS),
+                recall_select_entries(entries, RECALL_LAYER_KEYS),
                 session_id,
                 normalized_match,
                 false,
@@ -697,11 +699,7 @@ pub fn consolidate_l2_memory(
     let window_ms = effective_consolidation_window_ms(request.window_ms);
     let min_batch = request.min_batch.max(1);
     let requested_reducer = normalize_keywordish(&request.reducer);
-    let reducer = if requested_reducer == "llm" {
-        "heuristic"
-    } else {
-        "heuristic"
-    };
+    let reducer = "heuristic";
     let episodes = consolidation_l2_episodes(
         &conn,
         &request.user_id,
@@ -792,7 +790,7 @@ pub fn consolidate_l2_memory(
         }));
     }
 
-    let mut report = memory_consolidate_report(
+    let mut report = memory_consolidate_report(MemoryConsolidateReportInput {
         produced,
         consumed,
         auto_kept,
@@ -800,8 +798,8 @@ pub fn consolidate_l2_memory(
         window_ms,
         min_batch,
         reducer,
-        &requested_reducer,
-    );
+        requested_reducer: &requested_reducer,
+    });
     if requested_reducer == "llm" {
         if let Value::Object(ref mut object) = report {
             object.insert("llm-live-skipped?".to_string(), json!(true));
@@ -951,29 +949,42 @@ fn memory_consolidate_error_report(
 ) -> Value {
     json!({
         "error": error.into(),
-        "report": memory_consolidate_report(
-            0,
-            0,
-            0,
-            Vec::new(),
-            effective_consolidation_window_ms(request.window_ms),
-            request.min_batch.max(1),
-            "heuristic",
-            &normalize_keywordish(&request.reducer),
-        ),
+        "report": memory_consolidate_report(MemoryConsolidateReportInput {
+            produced: 0,
+            consumed: 0,
+            auto_kept: 0,
+            batches: Vec::new(),
+            window_ms: effective_consolidation_window_ms(request.window_ms),
+            min_batch: request.min_batch.max(1),
+            reducer: "heuristic",
+            requested_reducer: &normalize_keywordish(&request.reducer),
+        }),
     })
 }
 
-fn memory_consolidate_report(
+struct MemoryConsolidateReportInput<'a> {
     produced: usize,
     consumed: usize,
     auto_kept: usize,
     batches: Vec<Value>,
     window_ms: i64,
     min_batch: usize,
-    reducer: &str,
-    requested_reducer: &str,
-) -> Value {
+    reducer: &'a str,
+    requested_reducer: &'a str,
+}
+
+fn memory_consolidate_report(input: MemoryConsolidateReportInput<'_>) -> Value {
+    let MemoryConsolidateReportInput {
+        produced,
+        consumed,
+        auto_kept,
+        batches,
+        window_ms,
+        min_batch,
+        reducer,
+        requested_reducer,
+    } = input;
+
     json!({
         "from-layer": "l2",
         "to-layer": "l3",
@@ -1583,7 +1594,7 @@ pub fn explain_memory_session(db_path: impl AsRef<Path>, session_id: &str) -> Re
     }
 
     let rows = audit_rows_for_session(&conn, session_id)?;
-    let mut slots: Vec<(Option<String>, i64, Option<i64>, Vec<MemoryAuditRow>)> = Vec::new();
+    let mut slots: Vec<MemoryAuditTurnSlot> = Vec::new();
     for row in rows {
         if let Some((_, _, _, slot_rows)) = slots
             .iter_mut()
@@ -2382,7 +2393,7 @@ fn query_string(value: &Value, keys: &[&str]) -> Option<String> {
     keys.iter()
         .filter_map(|key| object_get_keyish(object, key))
         .filter_map(json_value_to_string)
-        .find_map(|value| non_blank_owned(value))
+        .find_map(non_blank_owned)
 }
 
 fn query_f64(value: &Value, keys: &[&str]) -> Option<f64> {
@@ -2523,8 +2534,7 @@ fn orphan_l2_episodes(
     if cap == 0 || orphan_sids.is_empty() || !table_exists(conn, "episodes")? {
         return Ok(Value::Array(Vec::new()));
     }
-    let placeholders = std::iter::repeat("?")
-        .take(orphan_sids.len())
+    let placeholders = std::iter::repeat_n("?", orphan_sids.len())
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(

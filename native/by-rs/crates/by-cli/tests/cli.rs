@@ -1455,7 +1455,8 @@ fn agents_command_uses_embedded_registry_by_default() {
         .success()
         .stdout(predicate::str::contains("agent(s) available:"))
         .stdout(predicate::str::contains("coact-agent"))
-        .stdout(predicate::str::contains("main-agent"));
+        .stdout(predicate::str::contains("main-agent"))
+        .stdout(predicate::str::contains("tool-agent"));
 }
 
 #[test]
@@ -2072,6 +2073,21 @@ fn tools_command_reads_refreshed_oracle_user_tool_commands() {
             "1 tool(s) listed. (filtered to id tools$create)",
         ))
         .stdout(predicate::str::contains("tools$list").not());
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["tools", "--fixture"])
+        .arg(&fixture)
+        .args(["--id", "tools$validate"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tools$validate"))
+        .stdout(predicate::str::contains("command"))
+        .stdout(predicate::str::contains("valid"))
+        .stdout(predicate::str::contains(
+            "1 tool(s) listed. (filtered to id tools$validate)",
+        ))
+        .stdout(predicate::str::contains("tools$create").not());
 }
 
 #[test]
@@ -4160,6 +4176,7 @@ fn agent_runtime_config_projects_read_and_set_without_agent_or_writes() {
     assert_eq!(read["config"]["permission-mode"], "auto-approve");
     assert_eq!(read["config"]["allowed-dirs"][0], "/tmp");
     assert_eq!(read["config"]["acp-backend"], "stub");
+    assert_eq!(read["config"]["auto-background-timeout-ms"], 120000);
     assert!(read["config"].get("working-dir").is_none());
 
     let assert = Command::cargo_bin("by-rs")
@@ -6593,6 +6610,10 @@ body
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let frontmatter: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        frontmatter["projection"],
+        "common.eval/eval$dossier-frontmatter"
+    );
     let frontmatter = frontmatter["frontmatter"].as_str().unwrap();
     assert!(frontmatter.contains("agent: eval-agent"));
     assert!(frontmatter.contains("verdict_path: .brainyard/agents/eval-agent/verdicts/v.md"));
@@ -6628,7 +6649,7 @@ body
     let write_preview: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(
         write_preview["projection"],
-        "common.plan/plan$dossier-write-preview"
+        "common.plan/plan$dossier-write"
     );
     assert_eq!(write_preview["write-skipped?"], true);
     assert_eq!(write_preview["slug"], "rust-port-2");
@@ -6671,7 +6692,7 @@ body
     let index_preview: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(
         index_preview["projection"],
-        "common.plan/plan$dossier-index-append-preview"
+        "common.plan/plan$dossier-index-append"
     );
     assert_eq!(index_preview["write-skipped?"], true);
     assert_eq!(index_preview["appended"], true);
@@ -6771,6 +6792,7 @@ body
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let plan_handoff: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(plan_handoff["projection"], "common.plan/plan$next-handoff");
     assert_eq!(plan_handoff["next-agent"], "todo-agent");
     assert!(plan_handoff["next-call"]
         .as_str()
@@ -6831,6 +6853,7 @@ body
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let eval_handoff: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(eval_handoff["projection"], "common.eval/eval$next-handoff");
     assert_eq!(eval_handoff["next-agent"], "plan-agent");
 }
 
@@ -7686,6 +7709,7 @@ fn explore_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let slug: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(slug["projection"], "common.explore/explore$slug");
     assert_eq!(slug["slug"], "port-clojure-rust");
 
     let assert = Command::cargo_bin("by-rs")
@@ -7723,6 +7747,10 @@ fn explore_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let frontmatter: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        frontmatter["projection"],
+        "common.explore/explore$frontmatter"
+    );
     let frontmatter = frontmatter["frontmatter"].as_str().unwrap();
     assert!(frontmatter.contains("agent: explore-agent"));
     assert!(frontmatter.contains("surfaces: [filesystem, mcp]"));
@@ -7783,6 +7811,10 @@ fn explore_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        parsed["projection"],
+        "common.explore/explore$read-frontmatter"
+    );
     assert_eq!(parsed["slug"], "rust-port");
     assert_eq!(parsed["question"], "Question-only needle for Rust port?");
     assert_eq!(parsed["surfaces"][1], "mcp");
@@ -7800,6 +7832,7 @@ fn explore_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let from_index: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(from_index["projection"], "common.explore/explore$find");
     assert_eq!(from_index["n-matches"], 1);
     assert_eq!(
         from_index["matches"][0]["path"],
@@ -7816,6 +7849,7 @@ fn explore_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let from_scan: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(from_scan["projection"], "common.explore/explore$find");
     assert_eq!(from_scan["n-matches"], 1);
     assert_eq!(from_scan["matches"][0]["slug"], "rust-port");
     assert_eq!(from_scan["matches"][0]["summary"], "Rust port summary");
@@ -7982,6 +8016,7 @@ fn update_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let slug: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(slug["projection"], "common.update/update$slug");
     assert_eq!(slug["slug"], "update-rust-port-safely");
 
     let assert = Command::cargo_bin("by-rs")
@@ -8020,6 +8055,10 @@ fn update_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let frontmatter: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        frontmatter["projection"],
+        "common.update/update$frontmatter"
+    );
     let frontmatter = frontmatter["frontmatter"].as_str().unwrap();
     assert!(frontmatter.contains("agent: update-agent"));
     assert!(frontmatter.contains("mode: pattern"));
@@ -8091,6 +8130,7 @@ fn update_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(parsed["projection"], "common.update/update$read-record");
     assert_eq!(parsed["slug"], "replace-timeout");
     assert_eq!(parsed["request"], "Replace timeout");
     assert_eq!(parsed["pre"]["match_count"], 1);
@@ -8108,6 +8148,7 @@ fn update_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let found: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(found["projection"], "common.update/update$find");
     assert_eq!(found["n-matches"], 1);
     assert_eq!(
         found["matches"][0]["path"],
@@ -8573,6 +8614,33 @@ stages:
         .unwrap()
         .args([
             "workflow",
+            "write-verdict-preview",
+            "--id",
+            "feature-launch--rust-port",
+            "--status",
+            "in-progress",
+            "--terminated",
+            "",
+            "--narrative",
+            "Still running",
+            "--base-dir",
+        ])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let workflow_in_progress_verdict: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(workflow_in_progress_verdict["status"], "in-progress");
+    assert!(workflow_in_progress_verdict["content"]
+        .as_str()
+        .unwrap()
+        .contains("status: in-progress\n"));
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "workflow",
             "index-append-preview",
             "--id",
             "feature-launch--rust-port",
@@ -8598,6 +8666,32 @@ stages:
     assert_eq!(
         workflow_index["line"],
         "- 2026-01-03 12:34 [feature-launch--rust-port](feature-launch--rust-port/) — partial · Rust port partially ready\n"
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "workflow",
+            "index-append-preview",
+            "--id",
+            "feature-launch--rust-port",
+            "--status",
+            "in-progress",
+            "--one-line",
+            "Rust port still running",
+            "--created",
+            "2026-01-03 12:35",
+            "--base-dir",
+        ])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let workflow_in_progress_index: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        workflow_in_progress_index["line"],
+        "- 2026-01-03 12:35 [feature-launch--rust-port](feature-launch--rust-port/) — in-progress · Rust port still running\n"
     );
 
     let assert = Command::cargo_bin("by-rs")
@@ -9169,6 +9263,40 @@ fn chart_guard_and_main_helpers_are_live_free_json_projections() {
         .unwrap()
         .args([
             "main",
+            "append-log-preview",
+            "--session-id",
+            "session-1",
+            "--turn",
+            "4",
+            "--iter",
+            "1",
+            "--question",
+            "Q4",
+            "--shape",
+            ":tool-lifecycle",
+            "--routed-to",
+            "tool-agent",
+            "--artifact",
+            "tools/a.md",
+            "--reason",
+            "Need tool lifecycle handling.",
+            "--base-dir",
+        ])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let append_tool_log: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let tool_line: serde_json::Value =
+        serde_json::from_str(append_tool_log["line"].as_str().unwrap()).unwrap();
+    assert_eq!(tool_line["shape"], "tool-lifecycle");
+    assert_eq!(tool_line["routed-to"], "tool-agent");
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "main",
             "append-pointer-preview",
             "--session-id",
             "session-1",
@@ -9205,9 +9333,9 @@ fn chart_guard_and_main_helpers_are_live_free_json_projections() {
             "--session-id",
             "session-1",
             "--turn-count",
-            "3",
+            "4",
             "--shapes",
-            r#"[:explore "direct-answer" :explore]"#,
+            r#"[:explore "direct-answer" :tool-lifecycle :explore]"#,
             "--created",
             "2026-06-03 12:34",
             "--base-dir",
@@ -9223,10 +9351,11 @@ fn chart_guard_and_main_helpers_are_live_free_json_projections() {
     assert_eq!(index["write-skipped?"], true);
     assert_eq!(
         index["line"],
-        "- 2026-06-03 12:34 [session session-1](session-1/) — turns: 3 · shapes: explore, direct-answer"
+        "- 2026-06-03 12:34 [session session-1](session-1/) — turns: 4 · shapes: explore, direct-answer, tool-lifecycle"
     );
     assert_eq!(index["shapes"][0], "explore");
     assert_eq!(index["shapes"][1], "direct-answer");
+    assert_eq!(index["shapes"][2], "tool-lifecycle");
     assert!(index["path"]
         .as_str()
         .unwrap()
@@ -11688,6 +11817,7 @@ fn init_doc_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let frontmatter: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(frontmatter["projection"], "common.init/init$frontmatter");
     let frontmatter_text = frontmatter["frontmatter"].as_str().unwrap();
     assert!(frontmatter_text.contains("agent: init-agent"));
     assert!(frontmatter_text.contains("scope: user"));
@@ -11741,7 +11871,7 @@ fn init_doc_helpers_are_live_free_json_projections() {
         .stderr(predicate::str::is_empty());
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let detected: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(detected["projection"], "common.init/detect-sources");
+    assert_eq!(detected["projection"], "common.init/init$detect-sources");
     assert_eq!(detected["read-skipped?"], true);
     assert_eq!(detected["scope"], "both");
     assert_eq!(detected["found"].as_array().unwrap().len(), 2);
@@ -13450,6 +13580,180 @@ description: Build local migration plans
 }
 
 #[test]
+fn explore_and_update_write_persist_records_without_live_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let content =
+        "---\nslug: rust-port\nagent: explore-agent\n---\n\n# Result\n\nNo live model needed.\n";
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "explore",
+            "write",
+            "--slug",
+            "rust-port",
+            "--content",
+            content,
+            "--base-dir",
+        ])
+        .arg(temp.path())
+        .args(["--ts", "20260102-030405"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let written: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(written["projection"], "common.explore/explore$write");
+    assert_eq!(written["written?"], true);
+    assert_eq!(written["slug"], "rust-port");
+    assert_eq!(
+        written["rel-path"],
+        ".brainyard/agents/explore-agent/results/20260102-030405-rust-port.md"
+    );
+    assert!(temp
+        .path()
+        .join(".brainyard/agents/explore-agent/results/20260102-030405-rust-port.md")
+        .is_file());
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "explore",
+            "write",
+            "--slug",
+            "rust-port",
+            "--content",
+            content,
+            "--base-dir",
+        ])
+        .arg(temp.path())
+        .args(["--ts", "20260102-030406"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let collision: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(collision["slug"], "rust-port-2");
+    assert_eq!(collision["collision?"], true);
+
+    let update_content =
+        "---\nslug: replace-timeout\nagent: update-agent\nok: true\n---\n\n# Edit\n\nReplace timeout.\n";
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "update",
+            "write",
+            "--slug",
+            "replace-timeout",
+            "--content",
+            update_content,
+            "--base-dir",
+        ])
+        .arg(temp.path())
+        .args(["--ts", "20260102-040506"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let update_written: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(update_written["projection"], "common.update/update$write");
+    assert_eq!(update_written["written?"], true);
+    assert!(temp
+        .path()
+        .join(".brainyard/agents/update-agent/edits/20260102-040506-replace-timeout.md")
+        .is_file());
+}
+
+#[test]
+fn update_apply_pattern_persists_edit_record_without_live_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let src_dir = temp.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    let target = src_dir.join("main.rs");
+    std::fs::write(&target, "fn main() {\n    let timeout = 30000;\n}\n").unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "update",
+            "apply",
+            "--request",
+            "Replace timeout",
+            "--target",
+            "src/main.rs",
+            "--mode",
+            "pattern",
+            "--pattern",
+            "30000",
+            "--replacement",
+            "120000",
+            "--base-dir",
+        ])
+        .arg(temp.path())
+        .args(["--ts", "20260103-040506"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let applied: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(applied["projection"], "common.update/update$apply");
+    assert_eq!(applied["ok?"], true);
+    assert_eq!(applied["mode"], "pattern");
+    assert_eq!(applied["target"], "src/main.rs");
+    assert_eq!(applied["replaced"], 1);
+    assert_eq!(applied["write"]["projection"], "common.update/update$write");
+    assert_eq!(applied["write"]["written?"], true);
+    assert!(std::fs::read_to_string(&target).unwrap().contains("120000"));
+    let rel_path = applied["write"]["rel-path"].as_str().unwrap();
+    assert!(temp.path().join(rel_path).is_file());
+    assert!(std::fs::read_to_string(temp.path().join(rel_path))
+        .unwrap()
+        .contains("timeout = 120000"));
+}
+
+#[test]
+fn main_session_id_projects_explicit_or_env_session_without_live_agent() {
+    let explicit = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env_remove("BRAINYARD_SESSION_ID")
+        .args(["main", "session-id", "--session-id", "main-session-1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let explicit_stdout = String::from_utf8(explicit.get_output().stdout.clone()).unwrap();
+    let explicit_json: serde_json::Value = serde_json::from_str(&explicit_stdout).unwrap();
+    assert_eq!(explicit_json["projection"], "common.main/main$session-id");
+    assert_eq!(explicit_json["session-id"], "main-session-1");
+
+    let from_env = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("BRAINYARD_SESSION_ID", "main-session-env")
+        .args(["main", "session-id"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let from_env_stdout = String::from_utf8(from_env.get_output().stdout.clone()).unwrap();
+    let from_env_json: serde_json::Value = serde_json::from_str(&from_env_stdout).unwrap();
+    assert_eq!(from_env_json["projection"], "common.main/main$session-id");
+    assert_eq!(from_env_json["session-id"], "main-session-env");
+
+    let missing = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env_remove("BRAINYARD_SESSION_ID")
+        .args(["main", "session-id"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let missing_stdout = String::from_utf8(missing.get_output().stdout.clone()).unwrap();
+    let missing_json: serde_json::Value = serde_json::from_str(&missing_stdout).unwrap();
+    assert_eq!(missing_json["projection"], "common.main/main$session-id");
+    assert!(missing_json["error"]
+        .as_str()
+        .unwrap()
+        .contains("No current main agent session"));
+}
+
+#[test]
 fn user_tools_list_and_read_persisted_records_without_registry() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("tools");
@@ -13487,6 +13791,7 @@ fn user_tools_list_and_read_persisted_records_without_registry() {
         .success();
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let detail: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(detail["projection"], "common.user-tools/tools$read");
     assert_eq!(detail["id"], "user$shout");
     assert_eq!(detail["body"], "(fn [args] (:text args))");
     assert!(detail["file"].as_str().unwrap().ends_with("shout.edn"));
@@ -13619,6 +13924,86 @@ fn user_tools_validate_definition_is_live_free_projection() {
     assert_eq!(delete["registry-skipped?"], true);
     assert_eq!(delete["write-skipped?"], true);
     assert!(root.join("shout.edn").is_file());
+}
+
+#[test]
+fn user_tools_validate_projects_tools_validate_without_live_registry() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("tools");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("shout.edn"),
+        r#"{:name "shout" :input-schema [:map] :body "(fn [args] args)"}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["user-tools", "validate", "--root"])
+        .arg(&root)
+        .args([
+            "--name",
+            "shout",
+            "--input-schema-edn",
+            "[:map [:text :string]]",
+            "--body",
+            "(fn [args] (:text args))",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let valid: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(valid["projection"], "common.user-tools/tools$validate");
+    assert_eq!(valid["valid"], true);
+    assert_eq!(valid["name-ok"], true);
+    assert_eq!(valid["collision"], true);
+    assert_eq!(valid["schema-ok"], true);
+    assert_eq!(valid["body-ok"], true);
+    assert!(valid["errors"].as_array().unwrap().is_empty());
+    assert_eq!(valid["eval-skipped?"], true);
+    assert_eq!(valid["registry-skipped?"], true);
+    assert_eq!(valid["write-skipped?"], true);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "user-tools",
+            "validate",
+            "--input-schema-edn",
+            "[:map [:text :string]]",
+            "--body",
+            "(fn [args] (:text args))",
+        ])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let unnamed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(unnamed["projection"], "common.user-tools/tools$validate");
+    assert_eq!(unnamed["valid"], true);
+    assert!(unnamed.get("name-ok").is_none());
+    assert_eq!(unnamed["collision"], false);
+    assert_eq!(unnamed["schema-ok"], true);
+    assert_eq!(unnamed["body-ok"], true);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["user-tools", "validate", "--input-schema-edn", "[:vector]"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let invalid: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(invalid["valid"], false);
+    assert_eq!(invalid["collision"], false);
+    assert_eq!(invalid["schema-ok"], false);
+    assert_eq!(invalid["body-ok"], false);
+    let errors = invalid["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|error| error.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(errors.iter().any(|error| error.contains(":input-schema")));
+    assert!(errors.iter().any(|error| error.contains(":body")));
 }
 
 #[test]
@@ -14660,4 +15045,575 @@ fn seed_memory_explain_rows(conn: &Connection) {
         [],
     )
     .unwrap();
+}
+
+#[test]
+fn workflow_resume_projects_existing_dossier_without_live_agent() {
+    let project = tempfile::tempdir().unwrap();
+    let workflow_dir = project
+        .path()
+        .join(".brainyard/agents/workflow-agent/rust-port");
+    std::fs::create_dir_all(&workflow_dir).unwrap();
+    std::fs::write(
+        workflow_dir.join("dossier.md"),
+        r#"---
+status: in-progress
+last_iteration: 3
+hitl_mode: gates
+acceptance:
+  - id: scope
+    status: satisfied
+    text: Scope locked
+  - id: tests
+    status: open
+    text: Tests passing
+---
+Body
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        workflow_dir.join("stages.edn"),
+        r#"{:stages [{:id :plan :status :satisfied}
+           {:id :exec :status :in-progress}
+           {:id "qa" :status :pending}
+           {:id :skip :status :skipped}]}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["workflow", "resume", "--id", "rust-port", "--base-dir"])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let projected: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(projected["projection"], "common.workflow/workflow$resume?");
+    assert_eq!(projected["exists?"], true);
+    assert_eq!(projected["status"], "in-progress");
+    assert_eq!(projected["last-iteration"], 3);
+    assert_eq!(projected["hitl-mode"], "gates");
+    assert_eq!(projected["acceptance-state"]["scope"], "satisfied");
+    assert_eq!(projected["acceptance-state"]["tests"], "open");
+    assert_eq!(
+        projected["pending-stages"],
+        serde_json::json!(["exec", "qa"])
+    );
+    assert_eq!(projected["stage-count"], 4);
+    assert_eq!(projected["n-pending"], 2);
+}
+
+#[test]
+fn research_resume_projects_existing_dossier_without_live_agent() {
+    let project = tempfile::tempdir().unwrap();
+    let research_dir = project
+        .path()
+        .join(".brainyard/agents/research-agent/rust-port");
+    std::fs::create_dir_all(&research_dir).unwrap();
+    std::fs::write(
+        research_dir.join("dossier.md"),
+        r#"---
+status: in-progress
+last_iteration: 4
+acceptance:
+  - id: scope
+    status: satisfied
+    text: Scope locked
+  - id: tests
+    status: open
+    text: Tests passing
+---
+Body
+"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["research", "resume", "--id", "rust-port", "--base-dir"])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let projected: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(projected["projection"], "common.research/research$resume?");
+    assert_eq!(projected["exists?"], true);
+    assert_eq!(projected["status"], "in-progress");
+    assert_eq!(projected["last-iteration"], 4);
+    assert_eq!(projected["acceptance-state"]["scope"], "satisfied");
+    assert_eq!(projected["acceptance-state"]["tests"], "open");
+}
+
+#[test]
+fn main_agent_resume_projects_existing_routing_log_without_live_agent() {
+    let project = tempfile::tempdir().unwrap();
+    let session_dir = project
+        .path()
+        .join(".brainyard/agents/main-agent/agt-rust-port");
+    std::fs::create_dir_all(&session_dir).unwrap();
+    std::fs::write(
+        session_dir.join("routing.log"),
+        "{\"turn\":1,\"shape\":\"analysis\",\"artifact\":\"plan.md\"}\n{\"turn\":2,\"shape\":\"tool-lifecycle\",\"artifact\":\"verdict.md\"}\n",
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "main",
+            "resume",
+            "--session-id",
+            "agt-rust-port",
+            "--base-dir",
+        ])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let projected: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(projected["projection"], "common.main/main$resume?");
+    assert_eq!(projected["exists?"], true);
+    assert_eq!(projected["line-count"], 2);
+    assert_eq!(projected["turn-count"], 2);
+    assert_eq!(projected["last-shape"], "tool-lifecycle");
+    assert_eq!(projected["last-artifact"], "verdict.md");
+}
+
+#[test]
+fn workflow_and_research_identity_template_probes_include_oracle_projection() {
+    let project = tempfile::tempdir().unwrap();
+    let workflows_dir = project.path().join(".brainyard/workflows");
+    std::fs::create_dir_all(&workflows_dir).unwrap();
+    std::fs::write(
+        workflows_dir.join("project-flow.edn"),
+        r#"{:workflow/id :project-flow
+ :workflow/name "Project Flow"
+ :workflow/description "Project local"}"#,
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "workflow",
+            "id",
+            "--template",
+            "feature-launch",
+            "--question",
+            "Can we ship the Rust port?",
+            "--max-chars",
+            "40",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let workflow_id: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(workflow_id["projection"], "common.workflow/workflow$id");
+    assert_eq!(workflow_id["slug"], "feature-launch--rust-port");
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["workflow", "list-templates", "--base-dir"])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let templates: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        templates["projection"],
+        "common.workflow/workflow$list-templates"
+    );
+    assert!(templates["templates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|template| template["id"] == "project-flow"));
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "workflow",
+            "load-template",
+            "--id",
+            "doc-update",
+            "--base-dir",
+        ])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let template: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(
+        template["projection"],
+        "common.workflow/workflow$load-template"
+    );
+    assert_eq!(template["source"], "built-in");
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "research",
+            "id",
+            "--question",
+            "Port Clojure Rust?",
+            "--max-chars",
+            "40",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let research_id: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(research_id["projection"], "common.research/research$id");
+    assert_eq!(research_id["slug"], "port-clojure-rust");
+}
+
+#[test]
+fn main_and_memory_read_only_probes_include_oracle_projection() {
+    let project = tempfile::tempdir().unwrap();
+    let routing_dir = project
+        .path()
+        .join(".brainyard/agents/main-agent/session-1");
+    std::fs::create_dir_all(&routing_dir).unwrap();
+    std::fs::write(
+        routing_dir.join("routing.log"),
+        "{\"turn\":1,\"shape\":\"explore\",\"artifact\":\"a.md\"}\n{\"turn\":2,\"shape\":\"direct-answer\",\"artifact\":\"b.md\"}\n",
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "main",
+            "last-shape",
+            "--session-id",
+            "session-1",
+            "--base-dir",
+        ])
+        .arg(project.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let last_shape: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(last_shape["projection"], "common.main/main$last-shape");
+    assert_eq!(last_shape["shape"], "direct-answer");
+
+    let db_dir = tempfile::tempdir().unwrap();
+    let db_path = db_dir.path().join("memory.db");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    create_memory_schema(&conn);
+    conn.execute(
+        "INSERT OR REPLACE INTO memory_metadata (key, value) VALUES ('schema_version', '2.0.0')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO episodes (session_id, user_id, episode_type, role, content, keep_flag) VALUES ('s1', 'u1', 'conversation', 'assistant', 'blue deploy note', 1)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO semantic_facts (user_id, fact_type, content, confidence) VALUES ('u1', 'preference', 'green release preference', 0.9)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO memory_audit (user_id, session_id, agent_id, turn_id, total_turns, entry_id, layer, byte_cost) VALUES ('u1', 's1', 'coact-agent', 1, 1, 'entry-1', 'l2', 42)",
+        [],
+    )
+    .unwrap();
+    drop(conn);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["memory", "stats", "--db"])
+        .arg(&db_path)
+        .args(["--user-id", "u1", "--session-id", "s1"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let stats: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(stats["projection"], "common.commands/memory$stats");
+    assert_eq!(stats["stats"]["l2"]["total"], 1);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "memory",
+            "keywords",
+            "--text",
+            "AWS EC2 costs are high, need to optimize EC2 spending",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let keywords: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(keywords["projection"], "common.commands/memory$keywords");
+    assert!(keywords["keywords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|keyword| keyword == "ec2"));
+}
+
+#[test]
+fn aws_config_and_task_read_only_probes_include_oracle_projection() {
+    let aws_home = tempfile::tempdir().unwrap();
+    let aws_dir = aws_home.path().join(".aws");
+    std::fs::create_dir_all(&aws_dir).unwrap();
+    std::fs::write(
+        aws_dir.join("credentials"),
+        "[default]\naws_access_key_id = AKIADEFAULT\naws_secret_access_key = SECRETDEFAULT\n[dev]\naws_access_key_id = AKIADEV\naws_secret_access_key = SECRETDEV\n",
+    )
+    .unwrap();
+    std::fs::write(
+        aws_dir.join("config"),
+        "[default]\nregion = us-east-1\n[profile dev]\nregion = ap-northeast-2\noutput = json\n",
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["aws", "list-profiles", "--aws-dir"])
+        .arg(&aws_dir)
+        .assert()
+        .success();
+    let list: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(list["projection"], "common.aws-commands/aws$list-profiles");
+    assert_eq!(list["result"]["total"], 2);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["aws", "get-profile", "--profile-name", "dev", "--aws-dir"])
+        .arg(&aws_dir)
+        .assert()
+        .success();
+    let profile: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(profile["projection"], "common.aws-commands/aws$get-profile");
+    assert_eq!(profile["result"]["name"], "dev");
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "config",
+            "slug",
+            "--reason",
+            "Need Bedrock parity now",
+            "--max-chars",
+            "20",
+        ])
+        .assert()
+        .success();
+    let slug: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(slug["projection"], "common.config/config$slug");
+    assert_eq!(slug["slug"], "need-bedrock-parity-");
+
+    let project = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .args(["config", "diff", "--scope", "project", "--project-dir"])
+        .arg(project.path())
+        .args(["--proposed-edn", "{:llm {:default-provider :bedrock}}"])
+        .assert()
+        .success();
+    let diff: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(diff["projection"], "common.config/config$diff");
+    assert_eq!(
+        diff["structural"]["adds"]["llm"]["default-provider"],
+        "bedrock"
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "config",
+            "frontmatter",
+            "--slug",
+            "cfg-demo",
+            "--session-id",
+            "s1",
+            "--config-path",
+            "/tmp/config.edn",
+            "--snapshot",
+            "/tmp/snap.edn",
+            "--writes",
+            "1",
+            "--reverts",
+            "0",
+            "--started",
+            "2026-01-01T00:00:00Z",
+            "--ended",
+            "2026-01-01T00:01:00Z",
+            "--next-step",
+            "done",
+        ])
+        .assert()
+        .success();
+    let frontmatter: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(
+        frontmatter["projection"],
+        "common.config/config$frontmatter"
+    );
+    assert!(frontmatter["frontmatter"]
+        .as_str()
+        .unwrap()
+        .contains("agent: config-agent"));
+
+    let tasks_dir = tempfile::tempdir().unwrap();
+    let root = tasks_dir.path().join("tasks");
+    let task_dir = root.join("task-1");
+    std::fs::create_dir_all(&task_dir).unwrap();
+    std::fs::write(
+        task_dir.join("meta.edn"),
+        r#"{:id :task-1
+            :name "build fixture"
+            :job-type :bash
+            :status :completed
+            :created-at 100
+            :started-at 120
+            :completed-at 150
+            :result {:exit-code 0}}"#,
+    )
+    .unwrap();
+    std::fs::write(task_dir.join("output.log"), "first\nsecond\nthird\n").unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["tasks", "list", "--root"])
+        .arg(&root)
+        .assert()
+        .success();
+    let tasks: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(tasks["projection"], "task.commands/task$list");
+    assert_eq!(tasks["total"], 1);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["tasks", "detail", "--root"])
+        .arg(&root)
+        .args(["task-1", "--last-n", "2"])
+        .assert()
+        .success();
+    let detail: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(detail["projection"], "task.commands/task$detail");
+    assert_eq!(detail["id"], "task-1");
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["tasks", "sweep", "--root"])
+        .arg(&root)
+        .args(["--retention-count", "0", "--retention-days", "0"])
+        .assert()
+        .success();
+    let sweep: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(sweep["projection"], "task.commands/task$sweep");
+    assert_eq!(sweep["results"][0]["candidates"][0]["id"], "task-1");
+}
+
+#[test]
+fn rlm_read_only_helpers_include_oracle_projection() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "rlm",
+            "chunk-text",
+            "--text",
+            "abcdef",
+            "--size",
+            "4",
+            "--overlap",
+            "1",
+        ])
+        .assert()
+        .success();
+    let chunk_text: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(chunk_text["projection"], "common.rlm/rlm$chunk-text");
+    assert_eq!(chunk_text["n-chunks"], 2);
+
+    let dir = tempfile::tempdir().unwrap();
+    let one = dir.path().join("one.txt");
+    let two = dir.path().join("two.txt");
+    std::fs::write(&one, "alpha").unwrap();
+    std::fs::write(&two, "beta").unwrap();
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["rlm", "chunk-files", "--path"])
+        .arg(&one)
+        .args(["--path"])
+        .arg(&two)
+        .args(["--group-size", "1", "--max-bytes", "100"])
+        .assert()
+        .success();
+    let chunk_files: serde_json::Value =
+        serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(chunk_files["projection"], "common.rlm/rlm$chunk-files");
+    assert_eq!(chunk_files["n-chunks"], 2);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "rlm",
+            "parse-map-results",
+            "--result",
+            "{:category :bug}",
+            "--result",
+            "{\"category\":\"feature\"}",
+            "--shape",
+            "edn",
+        ])
+        .assert()
+        .success();
+    let parsed: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(parsed["projection"], "common.rlm/rlm$parse-map-results");
+    assert_eq!(parsed["n-parsed"], 2);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "rlm",
+            "reduce-counts",
+            "--parsed-results",
+            "[{:category :bug} {:category :bug} {:category :feature}]",
+            "--key",
+            "category",
+        ])
+        .assert()
+        .success();
+    let reduced: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(reduced["projection"], "common.rlm/rlm$reduce-counts");
+    assert_eq!(reduced["total"], 3);
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "rlm",
+            "conservative-verdict",
+            "--parsed-results",
+            "[{:malicious? false} {:parse-failed true :raw \"x\"} {:malicious? true}]",
+            "--positive-key",
+            "malicious?",
+        ])
+        .assert()
+        .success();
+    let verdict: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(verdict["projection"], "common.rlm/rlm$conservative-verdict");
+    assert_eq!(verdict["verdict"], true);
 }

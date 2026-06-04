@@ -1969,7 +1969,7 @@ fn usage_format_parts(group: &UsageTokenGroup, label: &str, color_enabled: bool)
     }
     let total = group.estimated_tokens.max(0);
     let mut parts = group.parts.clone();
-    parts.sort_by(|a, b| b.estimated_tokens.cmp(&a.estimated_tokens));
+    parts.sort_by_key(|part| std::cmp::Reverse(part.estimated_tokens));
     let rows = parts
         .iter()
         .map(|part| {

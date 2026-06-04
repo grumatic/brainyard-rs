@@ -1861,6 +1861,7 @@ enum AnsiCommand {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum DossierCommand {
     /// Build an agent-compatible dossier slug without writing a dossier.
     #[command(hide = true)]
@@ -2447,6 +2448,22 @@ enum ExploreCommand {
         #[arg(long, value_name = "TEXT")]
         created: Option<String>,
     },
+    /// Persist an explore-agent result markdown file.
+    #[command(hide = true)]
+    Write {
+        /// Kebab-case slug.
+        #[arg(long, value_name = "SLUG")]
+        slug: String,
+        /// Markdown content with YAML frontmatter.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        content: String,
+        /// Base directory for .brainyard.
+        #[arg(long = "base-dir", value_name = "PATH")]
+        base_dir: Option<PathBuf>,
+        /// Timestamp override in yyyyMMdd-HHmmss format.
+        #[arg(long, value_name = "TEXT")]
+        ts: Option<String>,
+    },
     /// Read only the leading frontmatter from an explore-agent result.
     #[command(name = "read-frontmatter", hide = true)]
     ReadFrontmatter {
@@ -2656,6 +2673,65 @@ enum UpdateCommand {
         /// Created timestamp override in yyyy-MM-dd HH:mm.
         #[arg(long, value_name = "TEXT")]
         created: Option<String>,
+    },
+    /// Persist an update-agent edit record markdown file.
+    #[command(hide = true)]
+    Write {
+        /// Kebab-case slug.
+        #[arg(long, value_name = "SLUG")]
+        slug: String,
+        /// Markdown content with YAML frontmatter.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        content: String,
+        /// Base directory for .brainyard.
+        #[arg(long = "base-dir", value_name = "PATH")]
+        base_dir: Option<PathBuf>,
+        /// Timestamp override in yyyyMMdd-HHmmss format.
+        #[arg(long, value_name = "TEXT")]
+        ts: Option<String>,
+    },
+    /// Apply a deterministic local edit and persist an update-agent record.
+    #[command(hide = true)]
+    Apply {
+        /// Verbatim edit request.
+        #[arg(long, value_name = "TEXT")]
+        request: String,
+        /// Repo-relative or absolute target file.
+        #[arg(long, value_name = "PATH")]
+        target: String,
+        /// Edit mode: pattern, syntax, or new-file.
+        #[arg(long, default_value = "pattern", value_name = "MODE")]
+        mode: String,
+        /// Literal or regex pattern to replace.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        pattern: Option<String>,
+        /// Replacement text.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        replacement: Option<String>,
+        /// Treat pattern as a regular expression.
+        #[arg(long = "regex", action = ArgAction::SetTrue)]
+        regex: bool,
+        /// Replace all matches instead of the first one.
+        #[arg(long = "all", action = ArgAction::SetTrue)]
+        all: bool,
+        /// New file content for new-file mode.
+        #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+        content: Option<String>,
+        /// Allow replacing an existing file in new-file mode.
+        #[arg(long = "dirty-ok", action = ArgAction::SetTrue)]
+        dirty_ok: bool,
+        /// Record that test execution was requested.
+        #[arg(long = "run-tests", action = ArgAction::SetTrue)]
+        run_tests: bool,
+        /// Record that lint failures would be accepted.
+        #[arg(long = "lint-ok-to-fail", action = ArgAction::SetTrue)]
+        lint_ok_to_fail: bool,
+        /// Base directory for resolving relative target and .brainyard paths.
+        #[arg(long = "base-dir", value_name = "PATH")]
+        base_dir: Option<PathBuf>,
+        /// Timestamp override in yyyyMMdd-HHmmss format.
+        #[arg(long, value_name = "TEXT")]
+        ts: Option<String>,
     },
     /// Read only the leading frontmatter from an update-agent record.
     #[command(name = "read-record", hide = true)]
@@ -3400,6 +3476,11 @@ enum MainAgentCommand {
         /// Working directory used as the routing-log base.
         #[arg(long = "base-dir", value_name = "PATH")]
         base_dir: Option<PathBuf>,
+    },
+    #[command(name = "session-id", hide = true)]
+    SessionId {
+        #[arg(long = "session-id", value_name = "ID")]
+        session_id: Option<String>,
     },
     /// Project main-agent routing-log directory bootstrap without writing files.
     #[command(name = "bootstrap-preview", hide = true)]
@@ -4798,6 +4879,29 @@ enum UserToolCommand {
         /// Clojure body string, usually `(fn [args] ...)`.
         #[arg(long, value_name = "SOURCE")]
         body: Option<String>,
+    },
+    /// Validate tools$validate input without eval, live registry, or writes.
+    #[command(name = "validate", hide = true)]
+    Validate {
+        /// User tool root. Defaults to <project>/.brainyard/tools.
+        #[arg(long, value_name = "PATH")]
+        root: Option<PathBuf>,
+        /// Tool name without user$ prefix. Optional for tools$validate.
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        /// Malli input schema EDN. Omit for no schema check.
+        #[arg(
+            long = "input-schema-edn",
+            value_name = "EDN",
+            allow_hyphen_values = true
+        )]
+        input_schema_edn: Option<String>,
+        /// Clojure body string, usually `(fn [args] ...)`.
+        #[arg(long, value_name = "SOURCE", allow_hyphen_values = true)]
+        body: Option<String>,
+        /// Optional sample args EDN. by-rs parses it but does not eval the body.
+        #[arg(long = "sample-edn", value_name = "EDN", allow_hyphen_values = true)]
+        sample_edn: Option<String>,
     },
     /// Project tools$create persistence/eval contract without eval, registry, or writes.
     #[command(name = "create-preview", hide = true)]
@@ -6216,6 +6320,12 @@ fn run() -> Result<()> {
             } => {
                 print_explore_index_append_preview(path, slug, surfaces, summary, base_dir, created)
             }
+            ExploreCommand::Write {
+                slug,
+                content,
+                base_dir,
+                ts,
+            } => print_explore_write(slug, content, base_dir, ts),
             ExploreCommand::ReadFrontmatter { path, base_dir } => {
                 print_explore_read_frontmatter(path, base_dir)
             }
@@ -6331,6 +6441,41 @@ fn run() -> Result<()> {
                 summary,
                 base_dir,
                 created,
+            }),
+            UpdateCommand::Write {
+                slug,
+                content,
+                base_dir,
+                ts,
+            } => print_update_write(slug, content, base_dir, ts),
+            UpdateCommand::Apply {
+                request,
+                target,
+                mode,
+                pattern,
+                replacement,
+                regex,
+                all,
+                content,
+                dirty_ok,
+                run_tests,
+                lint_ok_to_fail,
+                base_dir,
+                ts,
+            } => print_update_apply(UpdateApplyOptions {
+                request,
+                target,
+                mode,
+                pattern,
+                replacement,
+                regex,
+                all,
+                content,
+                dirty_ok,
+                run_tests,
+                lint_ok_to_fail,
+                base_dir,
+                ts,
             }),
             UpdateCommand::ReadRecord { path, base_dir } => {
                 print_update_read_record(path, base_dir)
@@ -6670,6 +6815,7 @@ fn run() -> Result<()> {
                 session_id,
                 base_dir,
             } => print_main_resume(session_id, base_dir),
+            MainAgentCommand::SessionId { session_id } => print_main_session_id(session_id),
             MainAgentCommand::BootstrapPreview {
                 session_id,
                 base_dir,
@@ -7243,6 +7389,13 @@ fn run() -> Result<()> {
                 input_schema_edn,
                 body,
             } => print_user_tool_validate_definition(name, description, input_schema_edn, body),
+            UserToolCommand::Validate {
+                root,
+                name,
+                input_schema_edn,
+                body,
+                sample_edn,
+            } => print_user_tool_validate(root, name, input_schema_edn, body, sample_edn),
             UserToolCommand::CreatePreview {
                 root,
                 name,
@@ -10687,6 +10840,7 @@ fn print_config_slug(reason: String, max_chars: usize) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.config/config$slug",
             "slug": config_slugify(&reason, max_chars),
         }))?
     );
@@ -10974,6 +11128,7 @@ fn print_config_diff(
     let before_text = serde_json::to_string_pretty(&current)?;
     let after_text = serde_json::to_string_pretty(&after)?;
     let response = serde_json::json!({
+        "projection": "common.config/config$diff",
         "diff": fallback_config_diff(&before_text, &after_text),
         "structural": structural_config_delta(&current, &after),
         "before": before_text,
@@ -11468,6 +11623,7 @@ fn print_config_frontmatter(opts: ConfigFrontmatterOptions) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.config/config$frontmatter",
             "frontmatter": frontmatter,
         }))?
     );
@@ -11759,7 +11915,7 @@ fn agent_runtime_default_config_json() -> serde_json::Value {
     );
     defaults.insert(
         "auto-background-timeout-ms".to_string(),
-        serde_json::Value::from(30000),
+        serde_json::Value::from(120000),
     );
     defaults.insert(
         "fast-eval-timeout-ms".to_string(),
@@ -13923,13 +14079,19 @@ fn print_memory_stats(
 ) -> Result<()> {
     let resolved_user_id = resolve_memory_user_id(user_id.as_deref());
     let db = resolve_memory_db_path(db, Some(resolved_user_id.clone()))?;
-    let report = by_memory::memory_stats(
+    let mut report = by_memory::memory_stats(
         &db,
         by_memory::MemoryStatsRequest {
             user_id: resolved_user_id,
             session_id,
         },
     )?;
+    if let Some(object) = report.as_object_mut() {
+        object.insert(
+            "projection".to_string(),
+            serde_json::json!("common.commands/memory$stats"),
+        );
+    }
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
@@ -14005,9 +14167,11 @@ fn memory_status_audit_summary(db: &Path, session_id: Option<&str>) -> Result<(u
 
 fn print_memory_keywords(text: String, min_length: usize, max_keywords: usize) -> Result<()> {
     let report = if text.trim().is_empty() {
-        serde_json::json!({"error": ":text is required"})
+        serde_json::json!({
+            "projection": "common.commands/memory$keywords","error": ":text is required"})
     } else {
         serde_json::json!({
+            "projection": "common.commands/memory$keywords",
             "keywords": by_memory::extract_keywords_with_limits(&text, min_length, max_keywords)
         })
     };
@@ -14471,6 +14635,7 @@ fn print_dossier_frontmatter(opts: DossierFrontmatterOptions) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": dossier_frontmatter_projection(opts.agent),
             "agent": opts.agent.agent_id(),
             "frontmatter": frontmatter,
         }))?
@@ -14576,7 +14741,7 @@ fn print_dossier_write_preview(opts: DossierWritePreviewOptions) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "projection": format!("{}/{}$dossier-write-preview", opts.agent.common_namespace(), opts.agent.command_prefix()),
+            "projection": dossier_write_projection(opts.agent),
             "write-skipped?": true,
             "path": absolute_path_string(&path),
             "rel-path": rel_path,
@@ -14747,7 +14912,7 @@ fn print_dossier_index_append_preview(opts: DossierIndexAppendPreviewOptions) ->
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "projection": format!("{}/{}$dossier-index-append-preview", opts.agent.common_namespace(), opts.agent.command_prefix()),
+            "projection": dossier_index_append_projection(opts.agent),
             "write-skipped?": true,
             "appended": true,
             "prepend?": true,
@@ -14812,6 +14977,10 @@ fn print_dossier_next_handoff(opts: DossierNextHandoffOptions) -> Result<()> {
     );
     let mut response = serde_json::Map::new();
     response.insert(
+        "projection".to_string(),
+        serde_json::json!(dossier_next_handoff_projection(opts.agent)),
+    );
+    response.insert(
         "agent".to_string(),
         serde_json::json!(opts.agent.agent_id()),
     );
@@ -14835,6 +15004,11 @@ fn print_json_error(error: &str) -> Result<()> {
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({ "error": error }))?
     );
+    Ok(())
+}
+
+fn print_json_value(value: &serde_json::Value) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
 
@@ -14868,6 +15042,42 @@ fn dossier_read_projection(agent: DossierAgent) -> &'static str {
         DossierAgent::Todo => "common.todo/todo$read-dossier",
         DossierAgent::Exec => "common.exec/exec$read-dossier",
         DossierAgent::Eval => "common.eval/eval$read-dossier",
+    }
+}
+
+fn dossier_frontmatter_projection(agent: DossierAgent) -> &'static str {
+    match agent {
+        DossierAgent::Plan => "common.plan/plan$dossier-frontmatter",
+        DossierAgent::Todo => "common.todo/todo$dossier-frontmatter",
+        DossierAgent::Exec => "common.exec/exec$dossier-frontmatter",
+        DossierAgent::Eval => "common.eval/eval$dossier-frontmatter",
+    }
+}
+
+fn dossier_write_projection(agent: DossierAgent) -> &'static str {
+    match agent {
+        DossierAgent::Plan => "common.plan/plan$dossier-write",
+        DossierAgent::Todo => "common.todo/todo$dossier-write",
+        DossierAgent::Exec => "common.exec/exec$dossier-write",
+        DossierAgent::Eval => "common.eval/eval$dossier-write",
+    }
+}
+
+fn dossier_index_append_projection(agent: DossierAgent) -> &'static str {
+    match agent {
+        DossierAgent::Plan => "common.plan/plan$dossier-index-append",
+        DossierAgent::Todo => "common.todo/todo$dossier-index-append",
+        DossierAgent::Exec => "common.exec/exec$dossier-index-append",
+        DossierAgent::Eval => "common.eval/eval$dossier-index-append",
+    }
+}
+
+fn dossier_next_handoff_projection(agent: DossierAgent) -> &'static str {
+    match agent {
+        DossierAgent::Plan => "common.plan/plan$next-handoff",
+        DossierAgent::Todo => "common.todo/todo$next-handoff",
+        DossierAgent::Exec => "common.exec/exec$next-handoff",
+        DossierAgent::Eval => "common.eval/eval$next-handoff",
     }
 }
 
@@ -17810,6 +18020,7 @@ fn print_explore_slug(question: String, max_chars: usize) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.explore/explore$slug",
             "slug": explore_slugify(&question, max_chars)
         }))?
     );
@@ -17832,9 +18043,126 @@ fn print_explore_frontmatter(opts: ExploreFrontmatterOptions) -> Result<()> {
     let frontmatter = build_explore_frontmatter(&opts);
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "frontmatter": frontmatter }))?
+        serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.explore/explore$frontmatter",
+            "frontmatter": frontmatter
+        }))?
     );
     Ok(())
+}
+
+struct AgentMarkdownWriteOptions {
+    projection: &'static str,
+    dir_rel: &'static str,
+    slug: String,
+    content: String,
+    base_dir: Option<PathBuf>,
+    ts: Option<String>,
+}
+
+struct AgentMarkdownWriteResult {
+    payload: serde_json::Value,
+}
+
+enum AgentMarkdownWriteOutcome {
+    Written(AgentMarkdownWriteResult),
+    Rejected(serde_json::Value),
+}
+
+fn agent_markdown_error(projection: &'static str, error: impl Into<String>) -> serde_json::Value {
+    serde_json::json!({
+        "projection": projection,
+        "error": error.into()
+    })
+}
+
+fn agent_markdown_with_projection(
+    mut payload: serde_json::Value,
+    projection: &'static str,
+) -> serde_json::Value {
+    if let serde_json::Value::Object(object) = &mut payload {
+        object.insert(
+            "projection".to_string(),
+            serde_json::Value::String(projection.to_string()),
+        );
+    }
+    payload
+}
+
+fn write_agent_markdown_record(
+    opts: AgentMarkdownWriteOptions,
+) -> Result<AgentMarkdownWriteOutcome> {
+    let requested_slug = opts.slug.trim().to_string();
+    if requested_slug.is_empty() {
+        return Ok(AgentMarkdownWriteOutcome::Rejected(agent_markdown_error(
+            opts.projection,
+            ":slug is required (string)",
+        )));
+    }
+    if !dossier_has_frontmatter_block(&opts.content) {
+        return Ok(AgentMarkdownWriteOutcome::Rejected(agent_markdown_error(
+            opts.projection,
+            ":content must begin with a YAML frontmatter block (---\\n...\\n---\\n)",
+        )));
+    }
+    if let Some(violation) = dossier_content_guard_violation(&opts.content) {
+        return Ok(AgentMarkdownWriteOutcome::Rejected(
+            agent_markdown_with_projection(violation, opts.projection),
+        ));
+    }
+
+    let base_dir = match opts.base_dir {
+        Some(path) => path,
+        None => std::env::current_dir()?,
+    };
+    let final_slug =
+        dossier_final_slug_with_suffix_in_dir(&base_dir, opts.dir_rel, &requested_slug)?;
+    let ts = opts.ts.unwrap_or_else(dossier_now_ts);
+    let rel_path = format!("{}/{ts}-{final_slug}.md", opts.dir_rel);
+    let path = base_dir.join(&rel_path);
+    let parent = path.parent().context("agent markdown path has no parent")?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+    std::fs::write(&path, opts.content.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
+
+    let payload = serde_json::json!({
+        "projection": opts.projection,
+        "written?": true,
+        "path": absolute_path_string(&path),
+        "rel-path": rel_path,
+        "slug": final_slug,
+        "requested-slug": requested_slug,
+        "ts": ts,
+        "bytes": opts.content.len(),
+        "collision?": final_slug != requested_slug,
+    });
+    Ok(AgentMarkdownWriteOutcome::Written(
+        AgentMarkdownWriteResult { payload },
+    ))
+}
+
+fn print_agent_markdown_write(outcome: AgentMarkdownWriteOutcome) -> Result<()> {
+    match outcome {
+        AgentMarkdownWriteOutcome::Written(result) => print_json_value(&result.payload),
+        AgentMarkdownWriteOutcome::Rejected(payload) => print_json_value(&payload),
+    }
+}
+
+fn print_explore_write(
+    slug: String,
+    content: String,
+    base_dir: Option<PathBuf>,
+    ts: Option<String>,
+) -> Result<()> {
+    print_agent_markdown_write(write_agent_markdown_record(AgentMarkdownWriteOptions {
+        projection: "common.explore/explore$write",
+        dir_rel: ".brainyard/agents/explore-agent/results",
+        slug,
+        content,
+        base_dir,
+        ts,
+    })?)
 }
 
 fn print_explore_index_append_preview(
@@ -17905,10 +18233,14 @@ fn print_explore_read_frontmatter(path: PathBuf, base_dir: Option<PathBuf>) -> R
         ))?;
         return Ok(());
     };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&parse_explore_frontmatter_yaml(&lines))?
-    );
+    let mut output = parse_explore_frontmatter_yaml(&lines);
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "projection".to_string(),
+            serde_json::json!("common.explore/explore$read-frontmatter"),
+        );
+    }
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
 
@@ -17922,6 +18254,7 @@ fn print_explore_find(query: String, base_dir: Option<PathBuf>) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.explore/explore$find",
             "matches": matches,
             "n-matches": matches.len(),
         }))?
@@ -18927,6 +19260,22 @@ struct UpdateIndexAppendPreviewOptions {
     created: Option<String>,
 }
 
+struct UpdateApplyOptions {
+    request: String,
+    target: String,
+    mode: String,
+    pattern: Option<String>,
+    replacement: Option<String>,
+    regex: bool,
+    all: bool,
+    content: Option<String>,
+    dirty_ok: bool,
+    run_tests: bool,
+    lint_ok_to_fail: bool,
+    base_dir: Option<PathBuf>,
+    ts: Option<String>,
+}
+
 fn print_update_slug(request: String, max_chars: usize) -> Result<()> {
     if max_chars == 0 {
         print_json_error(":max-chars must be a positive integer")?;
@@ -18935,6 +19284,7 @@ fn print_update_slug(request: String, max_chars: usize) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.update/update$slug",
             "slug": update_slugify(&request, max_chars)
         }))?
     );
@@ -18968,9 +19318,230 @@ fn print_update_frontmatter(opts: UpdateFrontmatterOptions) -> Result<()> {
     let frontmatter = build_update_frontmatter(&opts, &pre, &apply_block, &verify);
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "frontmatter": frontmatter }))?
+        serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.update/update$frontmatter",
+            "frontmatter": frontmatter
+        }))?
     );
     Ok(())
+}
+
+fn print_update_write(
+    slug: String,
+    content: String,
+    base_dir: Option<PathBuf>,
+    ts: Option<String>,
+) -> Result<()> {
+    print_agent_markdown_write(write_agent_markdown_record(AgentMarkdownWriteOptions {
+        projection: "common.update/update$write",
+        dir_rel: ".brainyard/agents/update-agent/edits",
+        slug,
+        content,
+        base_dir,
+        ts,
+    })?)
+}
+
+fn print_update_apply(opts: UpdateApplyOptions) -> Result<()> {
+    if opts.request.trim().is_empty() {
+        print_json_error(":request is required (string)")?;
+        return Ok(());
+    }
+    if opts.target.trim().is_empty() {
+        print_json_error(":target is required (string)")?;
+        return Ok(());
+    }
+
+    let mode = normalize_keywordish(&opts.mode);
+    if !matches!(mode.as_str(), "pattern" | "syntax" | "new-file") {
+        print_json_error(":mode must be pattern, syntax, or new-file")?;
+        return Ok(());
+    }
+
+    let base_dir = match opts.base_dir.clone() {
+        Some(path) => path,
+        None => std::env::current_dir()?,
+    };
+    let target_path = update_apply_target_path(&base_dir, &opts.target);
+    let target_display = opts.target.trim().to_string();
+
+    let (old_content, new_content, replaced, created) = if mode == "new-file" {
+        let Some(content) = opts.content.clone() else {
+            print_json_error(":content is required for new-file mode")?;
+            return Ok(());
+        };
+        if target_path.exists() && !opts.dirty_ok {
+            print_json_value(&serde_json::json!({
+                "projection": "common.update/update$apply",
+                "ok?": false,
+                "mode": mode,
+                "target": target_display,
+                "error": "target already exists; pass --dirty-ok to replace it"
+            }))?;
+            return Ok(());
+        }
+        let old_content = if target_path.is_file() {
+            std::fs::read_to_string(&target_path)
+                .with_context(|| format!("failed to read {}", target_path.display()))?
+        } else {
+            String::new()
+        };
+        (old_content, content, 0usize, !target_path.exists())
+    } else {
+        let Some(pattern) = opts.pattern.as_deref().filter(|value| !value.is_empty()) else {
+            print_json_error(":pattern is required for pattern/syntax mode")?;
+            return Ok(());
+        };
+        let Some(replacement) = opts.replacement.as_deref() else {
+            print_json_error(":replacement is required for pattern/syntax mode")?;
+            return Ok(());
+        };
+        let old_content = std::fs::read_to_string(&target_path)
+            .with_context(|| format!("failed to read {}", target_path.display()))?;
+        let (new_content, replaced) =
+            update_apply_replace(&old_content, pattern, replacement, opts.regex, opts.all)?;
+        if replaced == 0 {
+            print_json_value(&serde_json::json!({
+                "projection": "common.update/update$apply",
+                "ok?": false,
+                "mode": mode,
+                "target": target_display,
+                "replaced": 0,
+                "error": "pattern not found"
+            }))?;
+            return Ok(());
+        }
+        (old_content, new_content, replaced, false)
+    };
+
+    if let Some(parent) = target_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    std::fs::write(&target_path, new_content.as_bytes())
+        .with_context(|| format!("failed to write {}", target_path.display()))?;
+
+    let diff = tool_edit_fallback_diff(&old_content, &new_content, &target_display);
+    let rollback = if created {
+        format!("rm -- {}", target_display)
+    } else {
+        format!("git checkout -- {}", target_display)
+    };
+    let pre = update_apply_json_map(serde_json::json!({
+        "status": "ready",
+        "match_count": replaced,
+        "old_count_after": old_content.matches(&target_display).count()
+    }));
+    let apply_block = update_apply_json_map(serde_json::json!({
+        "pattern": opts.pattern.clone().unwrap_or_default(),
+        "replacement": opts.replacement.clone().unwrap_or_default(),
+        "regex": opts.regex,
+        "all": opts.all,
+        "replaced": replaced,
+        "path": target_display,
+        "bytes": new_content.len()
+    }));
+    let verify = update_apply_json_map(serde_json::json!({
+        "diff_match": old_content != new_content,
+        "old_count_after": old_content.lines().count(),
+        "new_count_after": new_content.lines().count(),
+        "lint": if opts.lint_ok_to_fail { "ok-to-fail" } else { "skipped" },
+        "tests": if opts.run_tests { "requested-not-run" } else { "skipped" }
+    }));
+    let slug = update_slugify(&opts.request, 60);
+    let frontmatter = build_update_frontmatter(
+        &UpdateFrontmatterOptions {
+            request: opts.request.clone(),
+            slug: slug.clone(),
+            mode: mode.clone(),
+            target: target_display.clone(),
+            rollback: rollback.clone(),
+            pre: None,
+            apply_block: None,
+            verify: None,
+            ok: true,
+            summary: Some(format!("Applied {mode} edit to {target_display}")),
+            created: None,
+            turn_id: None,
+            session_id: None,
+        },
+        &pre,
+        &apply_block,
+        &verify,
+    );
+    let record_content = format!("{frontmatter}\n# Edit\n\n```diff\n{diff}\n```\n");
+    let write = match write_agent_markdown_record(AgentMarkdownWriteOptions {
+        projection: "common.update/update$write",
+        dir_rel: ".brainyard/agents/update-agent/edits",
+        slug,
+        content: record_content,
+        base_dir: Some(base_dir),
+        ts: opts.ts,
+    })? {
+        AgentMarkdownWriteOutcome::Written(result) => result.payload,
+        AgentMarkdownWriteOutcome::Rejected(payload) => {
+            print_json_value(&payload)?;
+            return Ok(());
+        }
+    };
+
+    print_json_value(&serde_json::json!({
+        "projection": "common.update/update$apply",
+        "ok?": true,
+        "mode": mode,
+        "target": target_display,
+        "path": absolute_path_string(&target_path),
+        "created?": created,
+        "replaced": replaced,
+        "diff": diff,
+        "verify": serde_json::Value::Object(verify),
+        "rollback": rollback,
+        "write": write,
+    }))
+}
+
+fn update_apply_target_path(base_dir: &Path, target: &str) -> PathBuf {
+    let path = PathBuf::from(target.trim());
+    if path.is_absolute() {
+        path
+    } else {
+        base_dir.join(path)
+    }
+}
+
+fn update_apply_replace(
+    old_content: &str,
+    pattern: &str,
+    replacement: &str,
+    regex: bool,
+    all: bool,
+) -> Result<(String, usize)> {
+    if regex {
+        let re = regex::Regex::new(pattern)
+            .with_context(|| format!("invalid regex pattern: {pattern}"))?;
+        let replaced = re.find_iter(old_content).count();
+        let new_content = if all {
+            re.replace_all(old_content, replacement).to_string()
+        } else {
+            re.replacen(old_content, 1, replacement).to_string()
+        };
+        Ok((new_content, replaced))
+    } else {
+        let replaced = old_content.matches(pattern).count();
+        let new_content = if all {
+            old_content.replace(pattern, replacement)
+        } else {
+            old_content.replacen(pattern, replacement, 1)
+        };
+        Ok((new_content, replaced))
+    }
+}
+
+fn update_apply_json_map(value: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    }
 }
 
 fn print_update_index_append_preview(opts: UpdateIndexAppendPreviewOptions) -> Result<()> {
@@ -19049,10 +19620,14 @@ fn print_update_read_record(path: PathBuf, base_dir: Option<PathBuf>) -> Result<
         ))?;
         return Ok(());
     };
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&parse_update_record_yaml(&lines))?
-    );
+    let mut output = parse_update_record_yaml(&lines);
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "projection".to_string(),
+            serde_json::json!("common.update/update$read-record"),
+        );
+    }
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
 
@@ -19066,6 +19641,7 @@ fn print_update_find(query: String, base_dir: Option<PathBuf>) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.update/update$find",
             "matches": matches,
             "n-matches": matches.len(),
         }))?
@@ -19345,7 +19921,8 @@ fn print_workflow_id(question: String, template: Option<String>, max_chars: usiz
         .unwrap_or(q_slug);
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "slug": slug }))?
+        serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.workflow/workflow$id", "slug": slug }))?
     );
     Ok(())
 }
@@ -19362,6 +19939,7 @@ fn print_research_id(question: String, max_chars: usize) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.research/research$id",
             "slug": research_slugify(&question, max_chars)
         }))?
     );
@@ -19402,7 +19980,8 @@ fn print_workflow_list_templates(
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "templates": templates }))?
+        serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.workflow/workflow$list-templates", "templates": templates }))?
     );
     Ok(())
 }
@@ -19485,10 +20064,11 @@ fn print_workflow_load_template(
             println!(
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
-                    "template": template,
-                    "source": source.source,
-                    "path": source.display_path,
-                }))?
+                "projection": "common.workflow/workflow$load-template",
+                        "template": template,
+                        "source": source.source,
+                        "path": source.display_path,
+                    }))?
             );
         }
         Err(error) => print_json_error(&error)?,
@@ -19509,7 +20089,8 @@ fn print_workflow_resume(id: String, base_dir: Option<PathBuf>) -> Result<()> {
     if !dossier.is_file() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "exists?": false }))?
+            serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.workflow/workflow$resume?", "exists?": false }))?
         );
         return Ok(());
     }
@@ -19517,6 +20098,7 @@ fn print_workflow_resume(id: String, base_dir: Option<PathBuf>) -> Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.workflow/workflow$resume?",
                 "exists?": false,
                 "error": "dossier.md present but lacks frontmatter",
             }))?
@@ -19560,6 +20142,7 @@ fn print_workflow_resume(id: String, base_dir: Option<PathBuf>) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.workflow/workflow$resume?",
             "exists?": true,
             "status": workflow_frontmatter_scalar(&lines, "status").unwrap_or_else(|| "in-progress".to_string()),
             "last-iteration": workflow_frontmatter_scalar(&lines, "last_iteration")
@@ -19588,7 +20171,8 @@ fn print_research_resume(id: String, base_dir: Option<PathBuf>) -> Result<()> {
     if !dossier.is_file() {
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "exists?": false }))?
+            serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.research/research$resume?", "exists?": false }))?
         );
         return Ok(());
     }
@@ -19596,6 +20180,7 @@ fn print_research_resume(id: String, base_dir: Option<PathBuf>) -> Result<()> {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.research/research$resume?",
                 "exists?": false,
                 "error": "dossier.md present but lacks frontmatter",
             }))?
@@ -19606,6 +20191,7 @@ fn print_research_resume(id: String, base_dir: Option<PathBuf>) -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.research/research$resume?",
             "exists?": true,
             "status": workflow_frontmatter_scalar(&lines, "status").unwrap_or_else(|| "in-progress".to_string()),
             "last-iteration": workflow_frontmatter_scalar(&lines, "last_iteration")
@@ -20854,7 +21440,7 @@ fn print_research_update_status_preview(
     Ok(())
 }
 
-const WORKFLOW_TERMINAL_STATUSES: &[&str] = &["achieved", "partial", "abandoned"];
+const WORKFLOW_TERMINAL_STATUSES: &[&str] = &["in-progress", "achieved", "partial", "abandoned"];
 const RESEARCH_TERMINAL_STATUSES: &[&str] = &["achieved", "partial", "abandoned"];
 const WORKFLOW_STAGE_STATUSES: &[&str] = &[
     "pending",
@@ -21032,6 +21618,7 @@ fn read_workflow_stage_pairs(path: &Path) -> Result<Vec<serde_json::Value>> {
         .collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_workflow_verdict_content(
     id: &str,
     template_id: Option<&str>,
@@ -21150,6 +21737,7 @@ const MAIN_AGENT_VALID_SHAPES: &[&str] = &[
     "memory",
     "skill-lifecycle",
     "mcp-lifecycle",
+    "tool-lifecycle",
     "init",
     "config",
     "acp",
@@ -21704,11 +22292,7 @@ fn print_slack_resolve_recipient(
     else {
         return Ok(());
     };
-    match slack_resolve_recipient(
-        &recipient,
-        channels.as_ref().map(Vec::as_slice),
-        users.as_ref().map(Vec::as_slice),
-    ) {
+    match slack_resolve_recipient(&recipient, channels.as_deref(), users.as_deref()) {
         Ok(resolved) => print_slack_resolved("slack-command/resolve-recipient", &resolved),
         Err(error) => print_slack_projection_error("slack-command/resolve-recipient", error),
     }
@@ -21735,16 +22319,13 @@ fn print_slack_send_preflight(opts: SlackSendPreflightOptions) -> Result<()> {
     else {
         return Ok(());
     };
-    let resolved = match slack_resolve_recipient(
-        &opts.recipient,
-        channels.as_ref().map(Vec::as_slice),
-        users.as_ref().map(Vec::as_slice),
-    ) {
-        Ok(resolved) => resolved,
-        Err(error) => {
-            return print_slack_projection_error("slack-command/send-message-preflight", error)
-        }
-    };
+    let resolved =
+        match slack_resolve_recipient(&opts.recipient, channels.as_deref(), users.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                return print_slack_projection_error("slack-command/send-message-preflight", error)
+            }
+        };
 
     println!(
         "{}",
@@ -21970,6 +22551,7 @@ fn print_slack_projection_error(projection: &str, error: impl Into<String>) -> R
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn slack_parse_recipient_fixtures(
     channels: Option<String>,
     users: Option<String>,
@@ -22849,6 +23431,25 @@ fn print_main_append_pointer_preview(
     Ok(())
 }
 
+fn print_main_session_id(session_id: Option<String>) -> Result<()> {
+    let current_session_id = session_id
+        .or_else(|| std::env::var("BRAINYARD_SESSION_ID").ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    let output = match current_session_id {
+        Some(session_id) => serde_json::json!({
+            "projection": "common.main/main$session-id",
+            "session-id": session_id,
+        }),
+        None => serde_json::json!({
+            "projection": "common.main/main$session-id",
+            "error": "No current main agent session is bound",
+        }),
+    };
+    print_json_value(&output)
+}
+
 fn print_main_resume(session_id: String, base_dir: Option<PathBuf>) -> Result<()> {
     if session_id.trim().is_empty() {
         print_json_error(":session-id is required (string)")?;
@@ -22858,7 +23459,8 @@ fn print_main_resume(session_id: String, base_dir: Option<PathBuf>) -> Result<()
     if !path.parent().is_some_and(Path::is_dir) {
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "exists?": false }))?
+            serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.main/main$resume?", "exists?": false }))?
         );
         return Ok(());
     }
@@ -22873,6 +23475,7 @@ fn print_main_resume(session_id: String, base_dir: Option<PathBuf>) -> Result<()
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.main/main$resume?",
             "exists?": true,
             "session-id": session_id,
             "line-count": entries.len(),
@@ -22894,7 +23497,8 @@ fn print_main_last_shape(session_id: String, base_dir: Option<PathBuf>) -> Resul
     let Some(last) = entries.last() else {
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "exists?": false }))?
+            serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.main/main$last-shape", "exists?": false }))?
         );
         return Ok(());
     };
@@ -22902,6 +23506,7 @@ fn print_main_last_shape(session_id: String, base_dir: Option<PathBuf>) -> Resul
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.main/main$last-shape",
             "exists?": true,
             "shape": main_entry_string(last, "shape"),
             "routed-to": main_entry_string(last, "routed-to"),
@@ -26483,6 +27088,7 @@ fn print_context_budget_compactable(
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn parse_context_budget_sections_order(
     sections: &str,
     order: &str,
@@ -27891,7 +28497,7 @@ fn tool_simple_malli_json_schema(type_name: &str) -> serde_json::Value {
         "keyword" | "symbol" | "uuid" | "inst" => serde_json::json!({"type": "string"}),
         "nil" | "null" => serde_json::json!({"type": "null"}),
         "any" => serde_json::json!({}),
-        other if other.is_empty() => serde_json::json!({}),
+        "" => serde_json::json!({}),
         other => serde_json::json!({"type": other}),
     }
 }
@@ -28437,7 +29043,7 @@ fn print_init_doc_frontmatter(opts: InitDocFrontmatterOptions) -> Result<()> {
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
             "frontmatter": init_doc_frontmatter(&opts),
-            "projection": "common.init/build-dossier-frontmatter",
+            "projection": "common.init/init$frontmatter",
         }))?
     );
     Ok(())
@@ -28523,7 +29129,7 @@ fn print_init_doc_detect_sources(
             "scope": scope,
             "found": found,
             "missing": missing,
-            "projection": "common.init/detect-sources",
+            "projection": "common.init/init$detect-sources",
             "read-skipped?": true,
         }))?
     );
@@ -28545,10 +29151,7 @@ fn print_init_doc_read(
     let dirs = init_doc_dirs(project_dir, user_dir)?;
     let mut response = serde_json::Map::new();
     for scope in scopes {
-        response.insert(
-            scope.clone(),
-            init_doc_one_scope_read(&dirs, &scope)?.into(),
-        );
+        response.insert(scope.clone(), init_doc_one_scope_read(&dirs, &scope)?);
     }
     response.insert(
         "projection".to_string(),
@@ -28658,7 +29261,7 @@ fn print_init_doc_smoke_test(
     for scope in scopes {
         response.insert(
             scope.clone(),
-            init_doc_smoke_test_scope(&dirs, &scope, None)?.into(),
+            init_doc_smoke_test_scope(&dirs, &scope, None)?,
         );
     }
     response.insert(
@@ -28988,7 +29591,7 @@ fn init_doc_section_titles(sections: &[InitDocSection]) -> BTreeSet<String> {
         .collect()
 }
 
-fn init_doc_section_map<'a>(sections: &'a [InitDocSection]) -> BTreeMap<String, &'a str> {
+fn init_doc_section_map(sections: &[InitDocSection]) -> BTreeMap<String, &str> {
     sections
         .iter()
         .filter_map(|section| {
@@ -29610,6 +30213,7 @@ fn print_aws_list_profiles(aws_dir: Option<PathBuf>, user_dir: Option<PathBuf>) 
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.aws-commands/aws$list-profiles",
             "result": {
                 "profiles": profile_list,
                 "total": profile_list.len(),
@@ -29674,7 +30278,10 @@ fn print_aws_get_profile(
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&serde_json::json!({ "result": detail }))?
+        serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.aws-commands/aws$get-profile",
+            "result": detail
+        }))?
     );
     Ok(())
 }
@@ -29956,10 +30563,14 @@ fn aws_parse_string_vector(
 }
 
 fn print_rlm_chunk_text(text: String, size: usize, overlap: usize) -> Result<()> {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&rlm_chunk_text(&text, size, overlap))?
-    );
+    let mut output = rlm_chunk_text(&text, size, overlap);
+    if let Some(object) = output.as_object_mut() {
+        object.insert(
+            "projection".to_string(),
+            serde_json::json!("common.rlm/rlm$chunk-text"),
+        );
+    }
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
 
@@ -30007,6 +30618,7 @@ fn print_rlm_chunk_files(
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.rlm/rlm$chunk-files",
             "chunks": chunks,
             "n-chunks": chunks.len(),
             "errors": errors,
@@ -30046,6 +30658,7 @@ fn print_rlm_parse_map_results(results: Vec<String>, shape: String, per_line: bo
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.rlm/rlm$parse-map-results",
             "parsed": parsed,
             "failed": failed,
             "n-parsed": parsed.len(),
@@ -30103,6 +30716,7 @@ fn print_rlm_reduce_counts(parsed_results: String, key: String, count_key: Strin
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.rlm/rlm$reduce-counts",
             "counts": counts,
             "total": rlm_json_number(total),
             "n-categories": counts.len(),
@@ -30148,6 +30762,7 @@ fn print_rlm_conservative_verdict(parsed_results: String, positive_key: String) 
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "common.rlm/rlm$conservative-verdict",
             "verdict": positive_count > 0,
             "positive-key": positive_key,
             "positive-count": positive_count,
@@ -32924,6 +33539,7 @@ fn print_task_list(root: Option<PathBuf>, status: Option<String>) -> Result<()> 
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "task.commands/task$list",
             "tasks": tasks,
             "total": total,
         }))?
@@ -32954,6 +33570,10 @@ fn print_task_detail(root: Option<PathBuf>, task_id: String, last_n: Option<usiz
     let output_file = task_dir.join("output.log");
     let total_lines = count_lines(&output_file);
     let mut detail = serde_json::Map::new();
+    detail.insert(
+        "projection".to_string(),
+        serde_json::json!("task.commands/task$detail"),
+    );
     detail.insert("id".to_string(), serde_json::json!(task_id));
     detail.insert(
         "name".to_string(),
@@ -33261,6 +33881,7 @@ fn print_task_sweep(
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
+            "projection": "task.commands/task$sweep",
             "results": [{
                 "class": "tasks",
                 "root": root.display().to_string(),
@@ -34163,11 +34784,9 @@ fn sanitize_brainyard_skill_name(value: &str) -> String {
         if ch.is_ascii_alphanumeric() {
             output.push(ch);
             last_dash = false;
-        } else if ch.is_whitespace() || ch == '-' {
-            if !last_dash {
-                output.push('-');
-                last_dash = true;
-            }
+        } else if (ch.is_whitespace() || ch == '-') && !last_dash {
+            output.push('-');
+            last_dash = true;
         }
     }
     output.trim_matches('-').to_string()
@@ -34692,6 +35311,24 @@ fn print_user_tool_validate_definition(
     Ok(())
 }
 
+fn print_user_tool_validate(
+    root: Option<PathBuf>,
+    name: Option<String>,
+    input_schema_edn: Option<String>,
+    body: Option<String>,
+    sample_edn: Option<String>,
+) -> Result<()> {
+    let validation = user_tool_validate_preview(
+        root,
+        name.as_deref(),
+        input_schema_edn.as_deref(),
+        body.as_deref(),
+        sample_edn.as_deref(),
+    );
+    println!("{}", serde_json::to_string_pretty(&validation)?);
+    Ok(())
+}
+
 fn print_user_tool_create_preview(
     root: Option<PathBuf>,
     name: Option<String>,
@@ -34844,6 +35481,97 @@ fn user_tool_validate_definition(
     })
 }
 
+fn user_tool_validate_preview(
+    root: Option<PathBuf>,
+    name: Option<&str>,
+    input_schema_edn: Option<&str>,
+    body: Option<&str>,
+    sample_edn: Option<&str>,
+) -> serde_json::Value {
+    let name = name.map(str::trim).filter(|value| !value.is_empty());
+    let name_ok = name.map(safe_user_tool_name);
+    let resolved_root = root.or_else(default_user_tools_root);
+    let collision = match (name, resolved_root.as_ref()) {
+        (Some(name), Some(root)) if safe_user_tool_name(name) => {
+            root.join(format!("{name}.edn")).is_file()
+        }
+        (Some(_), Some(_)) | (Some(_), None) | (None, Some(_)) | (None, None) => false,
+    };
+
+    let (input_schema, schema_errors) = user_tool_parse_input_schema(input_schema_edn);
+    let schema_ok = schema_errors.is_empty();
+    let body_ok = body.is_some_and(|value| !value.trim().is_empty());
+
+    let mut errors = Vec::new();
+    if let Some(false) = name_ok {
+        errors.push("name must match ^[a-z][a-z0-9-]*$".to_string());
+    }
+    for error in schema_errors {
+        errors.push(user_tool_validation_error_reason(&error));
+    }
+    if !body_ok {
+        errors.push(":body is required (a string `(fn [args] ...)`)".to_string());
+    }
+
+    let sample_result = sample_edn
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|raw| match parse_rlm_json_or_edn(raw) {
+            Ok(input) => serde_json::json!({
+                "eval-skipped?": true,
+                "input": input,
+                "reason": "by-rs does not evaluate user tool bodies",
+            }),
+            Err(error) => {
+                errors.push(format!("failed to parse :sample EDN: {error}"));
+                serde_json::json!({
+                    "eval-skipped?": true,
+                    "error": error.to_string(),
+                })
+            }
+        });
+
+    let mut output = serde_json::json!({
+        "projection": "common.user-tools/tools$validate",
+        "valid": errors.is_empty(),
+        "collision": collision,
+        "schema-ok": schema_ok,
+        "body-ok": body_ok,
+        "errors": errors,
+        "input-schema": input_schema,
+        "eval-skipped?": true,
+        "registry-skipped?": true,
+        "write-skipped?": true,
+    });
+    if let serde_json::Value::Object(object) = &mut output {
+        if let Some(name) = name {
+            object.insert("name".to_string(), serde_json::json!(name));
+            object.insert("id".to_string(), serde_json::json!(format!("user${name}")));
+        }
+        if let Some(name_ok) = name_ok {
+            object.insert("name-ok".to_string(), serde_json::json!(name_ok));
+        }
+        if let Some(root) = resolved_root {
+            object.insert(
+                "root".to_string(),
+                serde_json::json!(root.display().to_string()),
+            );
+        }
+        if let Some(sample_result) = sample_result {
+            object.insert("sample-result".to_string(), sample_result);
+        }
+    }
+    output
+}
+
+fn user_tool_validation_error_reason(error: &serde_json::Value) -> String {
+    error
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| error.to_string())
+}
+
 fn user_tool_parse_input_schema(
     input_schema_edn: Option<&str>,
 ) -> (serde_json::Value, Vec<serde_json::Value>) {
@@ -34923,7 +35651,13 @@ fn print_user_tool_read(root: Option<PathBuf>, name: String) -> Result<()> {
 
     match read_user_tool_record(&file) {
         Ok(record) => {
-            let value = user_tool_record_to_json(&record, &file, true);
+            let mut value = user_tool_record_to_json(&record, &file, true);
+            if let Some(object) = value.as_object_mut() {
+                object.insert(
+                    "projection".to_string(),
+                    serde_json::json!("common.user-tools/tools$read"),
+                );
+            }
             println!("{}", serde_json::to_string_pretty(&value)?);
         }
         Err(error) => {
