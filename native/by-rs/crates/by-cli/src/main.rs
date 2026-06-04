@@ -37848,6 +37848,11 @@ fn run_init_list_snapshots_args(args: &str) -> bool {
     matches!(args.split_whitespace().next(), Some("list-snapshots"))
 }
 
+fn run_init_revert_missing_args(args: &str) -> bool {
+    let mut tokens = args.split_whitespace();
+    matches!(tokens.next(), Some("revert")) && tokens.next().is_none()
+}
+
 fn print_run_init_show_slash_command(input: &str) {
     print_run_command_header(input);
     match render_run_init_show() {
@@ -37981,6 +37986,11 @@ fn render_run_init_list_snapshots(args: &str) -> Result<String> {
         })
         .collect::<Vec<_>>()
         .join("\n"))
+}
+
+fn print_run_init_revert_usage_slash_command(input: &str) {
+    print_run_command_header(input);
+    print_run_warning_line("Usage: /init revert <snapshot-path>  (use /init list-snapshots first)");
 }
 
 fn run_static_slash_command_block(input: &str) -> Option<&'static str> {
@@ -38668,6 +38678,8 @@ fn handle_run_slash_command(ctx: RunSlashCommand<'_>) -> Result<bool> {
         print_run_init_list_snapshots_slash_command(input, args);
     } else if command == "/init" && run_init_show_args(args) {
         print_run_init_show_slash_command(input);
+    } else if command == "/init" && run_init_revert_missing_args(args) {
+        print_run_init_revert_usage_slash_command(input);
     } else if command == "/memory" && run_help_args(args) {
         print_run_static_slash_command(input, RUN_MEMORY_HELP_BLOCK);
     } else if command == "/init" && run_help_args(args) {

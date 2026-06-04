@@ -339,6 +339,26 @@ fn run_init_list_snapshots_slash_renders_project_snapshot_records() {
 }
 
 #[test]
+fn run_init_revert_without_snapshot_prints_usage() {
+    let home = tempfile::tempdir().unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-init-revert-usage")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin("/init revert\n/quit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Usage: /init revert <snapshot-path>  (use /init list-snapshots first)",
+        ))
+        .stdout(predicate::str::contains("Unknown slash command: /init").not())
+        .stderr(predicate::str::is_empty());
+}
+
+#[test]
 fn run_with_closed_stdin_stays_alive_like_tui() {
     let home = tempfile::tempdir().unwrap();
     let binary = assert_cmd::cargo::cargo_bin("by-rs");
