@@ -37844,8 +37844,52 @@ fn run_init_show_args(args: &str) -> bool {
     matches!(args.split_whitespace().next(), Some("show" | "read"))
 }
 
+struct RunInitFlagArgs {
+    scope: Option<String>,
+    rest: String,
+}
+
+fn parse_run_init_flags(args: &str) -> RunInitFlagArgs {
+    let mut scope = None;
+    let mut kept = Vec::new();
+    let mut tokens = args.split_whitespace();
+    while let Some(token) = tokens.next() {
+        match token {
+            "--scope" | ":scope" => {
+                if let Some(value) = tokens.next() {
+                    scope = Some(normalize_run_init_scope(value));
+                }
+            }
+            "--diff" | ":diff" | "--reseed" | ":reseed" => {}
+            value if value.starts_with("--scope=") => {
+                scope = Some(normalize_run_init_scope(
+                    value.trim_start_matches("--scope="),
+                ));
+            }
+            value if value.starts_with(":scope=") => {
+                scope = Some(normalize_run_init_scope(
+                    value.trim_start_matches(":scope="),
+                ));
+            }
+            value => kept.push(value.to_string()),
+        }
+    }
+    RunInitFlagArgs {
+        scope,
+        rest: kept.join(" "),
+    }
+}
+
+fn normalize_run_init_scope(value: &str) -> String {
+    value.trim_start_matches(':').to_string()
+}
+
 fn run_init_list_snapshots_args(args: &str) -> bool {
-    matches!(args.split_whitespace().next(), Some("list-snapshots"))
+    let parsed = parse_run_init_flags(args);
+    matches!(
+        parsed.rest.split_whitespace().next(),
+        Some("list-snapshots")
+    )
 }
 
 fn run_init_revert_missing_args(args: &str) -> bool {
@@ -37932,14 +37976,18 @@ struct RunInitListSnapshotsOptions {
 }
 
 fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOptions {
-    let mut scope = "both".to_string();
+    let parsed = parse_run_init_flags(args);
+    let mut scope = parsed.scope.unwrap_or_else(|| "both".to_string());
     let mut limit = 20;
-    let mut tokens = args.split_whitespace().skip(1);
+    let mut tokens = parsed.rest.split_whitespace();
+    if !matches!(tokens.next(), Some("list-snapshots")) {
+        return RunInitListSnapshotsOptions { scope, limit };
+    }
     while let Some(token) = tokens.next() {
         match token {
             "--scope" | ":scope" => {
                 if let Some(value) = tokens.next() {
-                    scope = value.to_string();
+                    scope = normalize_run_init_scope(value);
                 }
             }
             "--limit" | ":limit" => {
@@ -37948,7 +37996,10 @@ fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOpti
                 }
             }
             value if value.starts_with("--scope=") => {
-                scope = value.trim_start_matches("--scope=").to_string();
+                scope = normalize_run_init_scope(value.trim_start_matches("--scope="));
+            }
+            value if value.starts_with(":scope=") => {
+                scope = normalize_run_init_scope(value.trim_start_matches(":scope="));
             }
             value if value.starts_with("--limit=") => {
                 if let Ok(value) = value.trim_start_matches("--limit=").parse::<usize>() {
