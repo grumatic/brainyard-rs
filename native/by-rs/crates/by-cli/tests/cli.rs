@@ -1,4 +1,4 @@
-use assert_cmd::Command;
+use assert_cmd::Command as AssertCommand;
 use by_persist::list_sessions;
 use predicates::prelude::*;
 use rusqlite::Connection;
@@ -6,6 +6,32 @@ use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::thread;
 use std::time::Duration;
+
+struct Command(AssertCommand);
+
+impl Command {
+    fn cargo_bin<S: AsRef<str>>(name: S) -> Result<Self, assert_cmd::cargo::CargoError> {
+        let mut command = AssertCommand::cargo_bin(name.as_ref())?;
+        if name.as_ref() == "by-rs" {
+            command.env("BY_RS_ALLOW_ASK_TEST_OPTIONS", "1");
+        }
+        Ok(Self(command))
+    }
+}
+
+impl std::ops::Deref for Command {
+    type Target = AssertCommand;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Command {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 const TMUX_NEED_SESSION_GUIDANCE: &str =
     "You passed --with-tmux, but you're not currently inside a tmux session.
@@ -15102,6 +15128,21 @@ fn ask_missing_question_with_short_provider_and_model_flags_matches_clojure() {
         ))
         .stdout(predicate::str::contains("Usage: by ask [options] QUESTION"))
         .stderr(predicate::str::is_empty());
+}
+
+#[test]
+fn ask_test_only_options_are_unknown_without_gate() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env_remove("BY_RS_ALLOW_ASK_TEST_OPTIONS")
+        .args(["ask", "--dry-run", "hello"])
+        .assert()
+        .code(255)
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains(
+            "Option error: Unknown option: \"--dry-run\"",
+        ))
+        .stderr(predicate::str::contains("by ask - Ask a one-shot question"));
 }
 
 #[test]

@@ -5278,6 +5278,7 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    exit_compat_disabled_ask_test_option_if_requested(&raw_args);
     let cli = Cli::parse_from(normalize_default_run_args(raw_args));
     match cli.command {
         Commands::Run {
@@ -7822,6 +7823,61 @@ where
 
 fn is_help_flag(flag: &str) -> bool {
     matches!(flag, "--help" | "-?")
+}
+
+const ASK_TEST_ONLY_OPTIONS: &[&str] = &[
+    "--region",
+    "--aws-profile",
+    "--max-tokens",
+    "--temperature",
+    "--no-prompt-cache",
+    "--dry-run",
+    "--live",
+    "--fixture-response",
+];
+
+fn exit_compat_disabled_ask_test_option_if_requested(args: &[String]) {
+    if std::env::var_os("BY_RS_ALLOW_ASK_TEST_OPTIONS").is_some() {
+        return;
+    }
+    let Some(option) = first_disabled_ask_test_option(args) else {
+        return;
+    };
+
+    eprint!(
+        "** ERROR: **
+Option error: Unknown option: \"{}\"
+
+
+{}",
+        option,
+        ask_help()
+    );
+    std::process::exit(255);
+}
+
+fn first_disabled_ask_test_option(args: &[String]) -> Option<&'static str> {
+    let mut iter = args.iter().skip(1);
+    let command = iter.next()?;
+    if command != "ask" {
+        return None;
+    }
+
+    for arg in iter {
+        if arg == "--" {
+            break;
+        }
+        for option in ASK_TEST_ONLY_OPTIONS {
+            if arg == option
+                || arg
+                    .strip_prefix(option)
+                    .is_some_and(|suffix| suffix.starts_with('='))
+            {
+                return Some(*option);
+            }
+        }
+    }
+    None
 }
 
 fn exit_compat_short_h_error_if_requested(args: &[String]) {
