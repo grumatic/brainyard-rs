@@ -37840,6 +37840,61 @@ fn run_help_args(args: &str) -> bool {
     )
 }
 
+fn run_init_show_args(args: &str) -> bool {
+    matches!(args.split_whitespace().next(), Some("show" | "read"))
+}
+
+fn print_run_init_show_slash_command(input: &str) {
+    print_run_command_header(input);
+    match render_run_init_show() {
+        Ok(block) => println!("{block}"),
+        Err(error) => print_run_warning_line(&format!("Init read error: {error}")),
+    }
+}
+
+fn render_run_init_show() -> Result<String> {
+    let mut dirs = init_doc_dirs(None, None)?;
+    dirs.user_dir = system_user_home_dir().or(dirs.user_dir);
+    let blocks = ["project", "user"]
+        .into_iter()
+        .map(|scope| render_run_init_show_scope(&dirs, scope))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(blocks.join("\n"))
+}
+
+fn render_run_init_show_scope(dirs: &InitDocDirs, scope: &str) -> Result<String> {
+    let path = init_doc_brainyard_file(dirs, scope);
+    let path_label = path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "no path".to_string());
+    let header = format!(
+        "\x1b[1m\x1b[96m── {} ({path_label})\x1b[0m",
+        scope.to_ascii_uppercase()
+    );
+
+    let Some(path) = path else {
+        return Ok(format!(
+            "{header}\n\x1b[2m  (no BRAINYARD.md at this scope)\x1b[0m\n"
+        ));
+    };
+
+    let content = init_doc_read_content(&path)?.unwrap_or_default();
+    if content.trim().is_empty() {
+        return Ok(format!(
+            "{header}\n\x1b[2m  (no BRAINYARD.md at this scope)\x1b[0m\n"
+        ));
+    }
+
+    let size = std::fs::metadata(&path)
+        .with_context(|| format!("failed to stat {}", path.display()))?
+        .len();
+    let sections = init_doc_parse_sections(&content).len();
+    Ok(format!(
+        "{header}\n\x1b[2msize: {size} B, sections: {sections}\x1b[0m\n\n{content}\n"
+    ))
+}
+
 fn run_static_slash_command_block(input: &str) -> Option<&'static str> {
     match input {
         "/clear" => Some(RUN_CLEAR_BLOCK),
@@ -38521,6 +38576,8 @@ fn handle_run_slash_command(ctx: RunSlashCommand<'_>) -> Result<bool> {
         print_run_mcp_slash_command(input, args);
     } else if command == "/config" {
         print_run_config_slash_command(input, args);
+    } else if command == "/init" && run_init_show_args(args) {
+        print_run_init_show_slash_command(input);
     } else if command == "/memory" && run_help_args(args) {
         print_run_static_slash_command(input, RUN_MEMORY_HELP_BLOCK);
     } else if command == "/init" && run_help_args(args) {

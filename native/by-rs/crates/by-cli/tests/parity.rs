@@ -86,6 +86,16 @@ fn run_memory_and_init_help_match_oracle() {
 }
 
 #[test]
+fn run_init_show_without_docs_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    assert_command_matches_oracle(&oracle, &["run", "--inline"], "/init show\n/quit\n");
+}
+
+#[test]
 fn run_help_command_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;

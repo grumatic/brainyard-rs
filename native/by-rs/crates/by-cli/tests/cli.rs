@@ -275,6 +275,39 @@ fn run_memory_and_init_help_slash_print_static_help() {
 }
 
 #[test]
+fn run_init_show_slash_reads_project_and_lists_user_scope() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let project_brainyard = project.path().join(".brainyard/BRAINYARD.md");
+    std::fs::create_dir_all(project_brainyard.parent().unwrap()).unwrap();
+    std::fs::write(
+        &project_brainyard,
+        "# Project Brainyard\n\n## Notes\nProject note\n",
+    )
+    .unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_PROJECT_DIR", project.path())
+        .env("BRAINYARD_SESSION_ID", "agt-init-show")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin("/init show\n/quit\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("── PROJECT"));
+    assert!(stdout.contains("Project note"));
+    assert!(stdout.contains("── USER"));
+    assert!(stdout.contains("sections: 2"));
+    assert!(!stdout.contains("Unknown slash command: /init"));
+}
+
+#[test]
 fn run_with_closed_stdin_stays_alive_like_tui() {
     let home = tempfile::tempdir().unwrap();
     let binary = assert_cmd::cargo::cargo_bin("by-rs");
