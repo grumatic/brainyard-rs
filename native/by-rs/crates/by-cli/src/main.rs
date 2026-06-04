@@ -216,6 +216,9 @@ enum Commands {
         /// Filter to a single provider, e.g. bedrock or openai.
         #[arg(long, short = 'p', value_name = "PROVIDER")]
         provider: Option<String>,
+        /// Legacy positional provider filter.
+        #[arg(value_name = "PROVIDER")]
+        positional_provider: Option<String>,
     },
     /// Inspect pure LLM metadata command projections without network access.
     #[command(hide = true)]
@@ -5395,7 +5398,11 @@ fn run() -> Result<()> {
                 project_dir,
             } => print_agent_runtime_config(key, value, scope, project_dir),
         },
-        Commands::Models { fixture, provider } => print_models(fixture, provider),
+        Commands::Models {
+            fixture,
+            provider,
+            positional_provider: _,
+        } => print_models(fixture, provider),
         Commands::Llm { command } => match command {
             LlmCommand::ListModels {
                 fixture,

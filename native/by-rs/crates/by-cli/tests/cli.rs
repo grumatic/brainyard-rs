@@ -2167,6 +2167,19 @@ fn models_command_filters_by_provider() {
 }
 
 #[test]
+fn models_command_accepts_positional_provider_like_clojure() {
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .args(["models", "claude-code"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty())
+        .stdout(predicate::str::contains("claude-code"))
+        .stdout(predicate::str::contains("anthropic"))
+        .stdout(predicate::str::contains("filtered to claude-code").not());
+}
+
+#[test]
 fn models_command_accepts_short_provider_flag_like_clojure() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = dir.path().join("registry.json");

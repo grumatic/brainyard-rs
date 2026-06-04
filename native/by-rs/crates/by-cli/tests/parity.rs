@@ -42,6 +42,15 @@ fn help_surfaces_match_oracle() {
 }
 
 #[test]
+fn models_positional_provider_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+    assert_command_matches_oracle(&oracle, &["models", "claude-code"], "");
+}
+
+#[test]
 fn run_quit_contract_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
