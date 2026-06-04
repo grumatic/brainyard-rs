@@ -8,13 +8,14 @@ runner_command="${BY_RUST_RUNNER:-${BY_RS_RUNNER:-}}"
 smoke_home="${BY_RS_BEDROCK_HOME:-}"
 keep_home=0
 mode="dry-run"
-model="${BY_RS_BEDROCK_MODEL:-amazon.nova-lite-v1:0}"
+model="${BY_RS_BEDROCK_MODEL:-global.anthropic.claude-haiku-4-5-20251001-v1:0}"
 region="${BY_RS_BEDROCK_REGION:-}"
 profile="${BY_RS_BEDROCK_PROFILE:-}"
 max_tokens="${BY_RS_BEDROCK_MAX_TOKENS:-32}"
 question="${BY_RS_BEDROCK_QUESTION:-What is 2+2? Answer in one short sentence.}"
 cargo_home="${CARGO_HOME:-$HOME/.cargo}"
 rustup_home="${RUSTUP_HOME:-$HOME/.rustup}"
+host_home="${HOME:-}"
 
 usage() {
   cat <<'USAGE'
@@ -29,7 +30,7 @@ passed or BY_RS_BEDROCK_LIVE=1 is set.
 
 Environment knobs:
   BY_RS_BEDROCK_LIVE=1          Opt into the live Bedrock Converse call.
-  BY_RS_BEDROCK_MODEL=MODEL     Default: amazon.nova-lite-v1:0
+  BY_RS_BEDROCK_MODEL=MODEL     Default: global.anthropic.claude-haiku-4-5-20251001-v1:0
   BY_RS_BEDROCK_REGION=REGION   Optional; otherwise by-rs resolves AWS env/defaults.
   BY_RS_BEDROCK_PROFILE=PROFILE Optional; otherwise by-rs resolves AWS env/defaults.
   BY_RS_BEDROCK_MAX_TOKENS=N    Default: 32
@@ -45,6 +46,16 @@ truthy() {
     1|true|TRUE|yes|YES|y|Y|on|ON) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+configure_aws_env_for_isolated_home() {
+  if [[ -z "${AWS_CONFIG_FILE:-}" && -n "$host_home" && -f "$host_home/.aws/config" ]]; then
+    export AWS_CONFIG_FILE="$host_home/.aws/config"
+  fi
+
+  if [[ -z "${AWS_SHARED_CREDENTIALS_FILE:-}" && -n "$host_home" && -f "$host_home/.aws/credentials" ]]; then
+    export AWS_SHARED_CREDENTIALS_FILE="$host_home/.aws/credentials"
+  fi
 }
 
 abs_path() {
@@ -186,6 +197,7 @@ if [[ -n "$runner_command" ]]; then
   done
   (
     cd "$native_root"
+    configure_aws_env_for_isolated_home
     HOME="$smoke_home" \
     CARGO_HOME="$cargo_home" \
     RUSTUP_HOME="$rustup_home" \
@@ -195,6 +207,7 @@ if [[ -n "$runner_command" ]]; then
 else
   (
     cd "$native_root"
+    configure_aws_env_for_isolated_home
     HOME="$smoke_home" \
     CARGO_HOME="$cargo_home" \
     RUSTUP_HOME="$rustup_home" \

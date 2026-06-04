@@ -12,6 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const RESUME_LATEST_SENTINEL: &str = "--by-resume-latest--";
 const RUN_PREVIEW_ROWS: usize = 24;
 const RUN_PREVIEW_COLS: usize = 80;
+const QUERY_LLM_DEFAULT_BEDROCK_MODEL: &str = "global.anthropic.claude-haiku-4-5-20251001-v1:0";
+const MEMORY_SUB_LLM_DEFAULT_MAX_TOKENS: u32 = 512;
 static SESSION_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 const TMUX_NEED_SESSION_GUIDANCE: &str =
     "You passed --with-tmux, but you're not currently inside a tmux session.
@@ -963,7 +965,7 @@ enum MemoryCommand {
         #[arg(long = "project-dir", value_name = "PATH")]
         project_dir: Option<PathBuf>,
     },
-    /// Project memory-agent memory$essence-extract input contract without a live sub-LM.
+    /// Project or invoke memory-agent memory$essence-extract.
     #[command(name = "essence-extract", hide = true)]
     EssenceExtract {
         /// User identity for the essence request.
@@ -978,21 +980,57 @@ enum MemoryCommand {
         /// Recent L2 episodes, one per line.
         #[arg(long = "recent-episodes", default_value = "", value_name = "TEXT")]
         recent_episodes: String,
+        #[arg(long, default_value = "bedrock", hide = true)]
+        provider: String,
+        #[arg(long, value_name = "MODEL_ID", hide = true)]
+        model: Option<String>,
+        #[arg(long, value_name = "REGION", hide = true)]
+        region: Option<String>,
+        #[arg(long = "aws-profile", value_name = "PROFILE", hide = true)]
+        aws_profile: Option<String>,
+        #[arg(long = "max-tokens", value_name = "TOKENS", hide = true)]
+        max_tokens: Option<u32>,
+        #[arg(long, default_value_t = 0.0, hide = true)]
+        temperature: f64,
+        #[arg(long = "no-prompt-cache", hide = true)]
+        no_prompt_cache: bool,
+        #[arg(long, hide = true)]
+        dry_run: bool,
+        #[arg(long, hide = true)]
+        live: bool,
     },
-    /// Project memory-agent memory$verify-fact input contract without a live sub-LM.
+    /// Project or invoke memory-agent memory$verify-fact.
     #[command(name = "verify-fact", hide = true)]
     VerifyFact {
         /// Stored L3 fact map as JSON or EDN.
         #[arg(long, default_value = "{}", value_name = "JSON_OR_EDN")]
         fact: String,
-        /// Fresh recall evidence string.
+        /// Fresh recall/evidence snippet.
         #[arg(long = "fresh-recall", default_value = "", value_name = "TEXT")]
         fresh_recall: String,
-        /// User-supplied evidence string.
+        /// Additional user/system evidence.
         #[arg(long, default_value = "", value_name = "TEXT")]
         evidence: String,
+        #[arg(long, default_value = "bedrock", hide = true)]
+        provider: String,
+        #[arg(long, value_name = "MODEL_ID", hide = true)]
+        model: Option<String>,
+        #[arg(long, value_name = "REGION", hide = true)]
+        region: Option<String>,
+        #[arg(long = "aws-profile", value_name = "PROFILE", hide = true)]
+        aws_profile: Option<String>,
+        #[arg(long = "max-tokens", value_name = "TOKENS", hide = true)]
+        max_tokens: Option<u32>,
+        #[arg(long, default_value_t = 0.0, hide = true)]
+        temperature: f64,
+        #[arg(long = "no-prompt-cache", hide = true)]
+        no_prompt_cache: bool,
+        #[arg(long, hide = true)]
+        dry_run: bool,
+        #[arg(long, hide = true)]
+        live: bool,
     },
-    /// Project memory-agent memory$llm-consolidate input contract without a live sub-LM.
+    /// Project or invoke memory-agent memory$llm-consolidate.
     #[command(name = "llm-consolidate", hide = true)]
     LlmConsolidate {
         /// L2 episode vector as JSON or EDN.
@@ -1001,12 +1039,30 @@ enum MemoryCommand {
         /// Human description of the consolidation window.
         #[arg(long = "window-desc", default_value = "", value_name = "TEXT")]
         window_desc: String,
-        /// Existing L3 hits, one per line.
+        /// L3 hits, one per line.
         #[arg(long = "existing-l3-hits", default_value = "", value_name = "TEXT")]
         existing_l3_hits: String,
-        /// User identity for the reducer request.
+        /// User identity for the consolidation request.
         #[arg(long = "user-id", short = 'u', value_name = "ID")]
         user_id: Option<String>,
+        #[arg(long, default_value = "bedrock", hide = true)]
+        provider: String,
+        #[arg(long, value_name = "MODEL_ID", hide = true)]
+        model: Option<String>,
+        #[arg(long, value_name = "REGION", hide = true)]
+        region: Option<String>,
+        #[arg(long = "aws-profile", value_name = "PROFILE", hide = true)]
+        aws_profile: Option<String>,
+        #[arg(long = "max-tokens", value_name = "TOKENS", hide = true)]
+        max_tokens: Option<u32>,
+        #[arg(long, default_value_t = 0.0, hide = true)]
+        temperature: f64,
+        #[arg(long = "no-prompt-cache", hide = true)]
+        no_prompt_cache: bool,
+        #[arg(long, hide = true)]
+        dry_run: bool,
+        #[arg(long, hide = true)]
+        live: bool,
     },
     /// Project memory-agent memory$purge-plan without live registry state or writes.
     #[command(name = "purge-plan", hide = true)]
@@ -3313,7 +3369,7 @@ enum SlackCommand {
 
 #[derive(Debug, Subcommand)]
 enum QueryCommand {
-    /// Project common.commands/query$llm without a live sub-LLM call.
+    /// Project or invoke common.commands/query$llm.
     #[command(name = "llm", hide = true)]
     Llm {
         /// Single prompt to send to the sub-LLM.
@@ -3325,6 +3381,24 @@ enum QueryCommand {
         /// Optional supplementary sub-context.
         #[arg(long = "sub-context", value_name = "TEXT")]
         sub_context: Option<String>,
+        #[arg(long, default_value = "bedrock", value_name = "PROVIDER", hide = true)]
+        provider: String,
+        #[arg(long, value_name = "MODEL", hide = true)]
+        model: Option<String>,
+        #[arg(long, value_name = "REGION", hide = true)]
+        region: Option<String>,
+        #[arg(long = "aws-profile", value_name = "PROFILE", hide = true)]
+        aws_profile: Option<String>,
+        #[arg(long = "max-tokens", value_name = "N", hide = true)]
+        max_tokens: Option<u32>,
+        #[arg(long, default_value_t = 0.0, hide = true)]
+        temperature: f64,
+        #[arg(long = "no-prompt-cache", action = ArgAction::SetTrue, hide = true)]
+        no_prompt_cache: bool,
+        #[arg(long = "dry-run", action = ArgAction::SetTrue, hide = true)]
+        dry_run: bool,
+        #[arg(long, action = ArgAction::SetTrue, hide = true)]
+        live: bool,
     },
     /// Project common.commands/query$clone without a running cloned agent.
     #[command(name = "clone", hide = true)]
@@ -5570,20 +5644,92 @@ fn run() -> Result<()> {
                 turn_summary,
                 turn_messages,
                 recent_episodes,
-            } => {
-                print_memory_essence_extract(user_id, turn_summary, turn_messages, recent_episodes)
-            }
+                provider,
+                model,
+                region,
+                aws_profile,
+                max_tokens,
+                temperature,
+                no_prompt_cache,
+                dry_run,
+                live,
+            } => print_memory_essence_extract(
+                user_id,
+                turn_summary,
+                turn_messages,
+                recent_episodes,
+                SubLlmRunOptions {
+                    provider,
+                    model,
+                    region,
+                    aws_profile,
+                    max_tokens,
+                    temperature,
+                    no_prompt_cache,
+                    dry_run,
+                    live,
+                },
+            ),
             MemoryCommand::VerifyFact {
                 fact,
                 fresh_recall,
                 evidence,
-            } => print_memory_verify_fact(fact, fresh_recall, evidence),
+                provider,
+                model,
+                region,
+                aws_profile,
+                max_tokens,
+                temperature,
+                no_prompt_cache,
+                dry_run,
+                live,
+            } => print_memory_verify_fact(
+                fact,
+                fresh_recall,
+                evidence,
+                SubLlmRunOptions {
+                    provider,
+                    model,
+                    region,
+                    aws_profile,
+                    max_tokens,
+                    temperature,
+                    no_prompt_cache,
+                    dry_run,
+                    live,
+                },
+            ),
             MemoryCommand::LlmConsolidate {
                 episodes,
                 window_desc,
                 existing_l3_hits,
                 user_id,
-            } => print_memory_llm_consolidate(episodes, window_desc, existing_l3_hits, user_id),
+                provider,
+                model,
+                region,
+                aws_profile,
+                max_tokens,
+                temperature,
+                no_prompt_cache,
+                dry_run,
+                live,
+            } => print_memory_llm_consolidate(
+                episodes,
+                window_desc,
+                existing_l3_hits,
+                user_id,
+                SubLlmRunOptions {
+                    provider,
+                    model,
+                    region,
+                    aws_profile,
+                    max_tokens,
+                    temperature,
+                    no_prompt_cache,
+                    dry_run,
+                    live,
+                },
+            ),
             MemoryCommand::PurgePlan {
                 db,
                 user_id,
@@ -6776,7 +6922,31 @@ fn run() -> Result<()> {
                 prompt,
                 prompts,
                 sub_context,
-            } => print_query_llm_projection(prompt, prompts, sub_context),
+                provider,
+                model,
+                region,
+                aws_profile,
+                max_tokens,
+                temperature,
+                no_prompt_cache,
+                dry_run,
+                live,
+            } => print_query_llm(
+                prompt,
+                prompts,
+                sub_context,
+                SubLlmRunOptions {
+                    provider,
+                    model,
+                    region,
+                    aws_profile,
+                    max_tokens,
+                    temperature,
+                    no_prompt_cache,
+                    dry_run,
+                    live,
+                },
+            ),
             QueryCommand::Clone {
                 query,
                 agent_context,
@@ -13773,8 +13943,32 @@ fn print_memory_essence_extract(
     turn_summary: String,
     turn_messages: String,
     recent_episodes: String,
+    options: SubLlmRunOptions,
 ) -> Result<()> {
     let resolved_user_id = resolve_memory_user_id(user_id.as_deref());
+    let projection = "memory-agent/memory$essence-extract";
+    if let Some(mode) = memory_sub_llm_mode(projection, &options)? {
+        let input = serde_json::json!({
+            "user-id": resolved_user_id,
+            "turn-summary": turn_summary,
+            "turn-messages": memory_nonempty_lines(&turn_messages),
+            "recent-episodes": memory_nonempty_lines(&recent_episodes),
+        });
+        let system = memory_essence_extract_system_prompt();
+        return print_memory_essence_extract_bedrock(
+            projection,
+            mode,
+            input,
+            system,
+            &options,
+            MemoryEssenceByteCounts {
+                turn_summary: turn_summary.len(),
+                turn_messages: turn_messages.len(),
+                recent_episodes: recent_episodes.len(),
+            },
+        );
+    }
+
     let mut report = serde_json::json!({
         "essences": [],
         "reasoning": serde_json::Value::Null,
@@ -13783,53 +13977,64 @@ fn print_memory_essence_extract(
         "turn-messages-bytes": turn_messages.len(),
         "recent-episodes-bytes": recent_episodes.len(),
     });
-    insert_memory_live_sub_lm_skip_metadata(
-        &mut report,
-        "memory-agent/memory$essence-extract",
-        Some(&resolved_user_id),
-    );
+    insert_memory_live_sub_lm_skip_metadata(&mut report, projection, Some(&resolved_user_id));
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
 
-fn print_memory_verify_fact(fact: String, fresh_recall: String, evidence: String) -> Result<()> {
+fn print_memory_verify_fact(
+    fact: String,
+    fresh_recall: String,
+    evidence: String,
+    options: SubLlmRunOptions,
+) -> Result<()> {
+    let projection = "memory-agent/memory$verify-fact";
     let fact_value = match parse_rlm_json_or_edn(&fact) {
-        Ok(value) if value.is_object() => value,
+        Ok(value) if value.as_object().is_some() => value,
         Ok(_) => {
             let mut report = serde_json::json!({
                 "verdict": serde_json::Value::Null,
-                "refined-content": "",
+                "refined-content": serde_json::Value::Null,
                 "new-confidence": serde_json::Value::Null,
-                "rationale": "",
                 "reasoning": serde_json::Value::Null,
                 "error": "fact must be a JSON or EDN map",
             });
-            insert_memory_live_sub_lm_skip_metadata(
-                &mut report,
-                "memory-agent/memory$verify-fact",
-                None,
-            );
+            insert_memory_live_sub_lm_skip_metadata(&mut report, projection, None);
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
         Err(error) => {
             let mut report = serde_json::json!({
                 "verdict": serde_json::Value::Null,
-                "refined-content": "",
+                "refined-content": serde_json::Value::Null,
                 "new-confidence": serde_json::Value::Null,
-                "rationale": "",
                 "reasoning": serde_json::Value::Null,
-                "error": format!("failed to parse fact as JSON or EDN: {error}"),
+                "error": error.to_string(),
             });
-            insert_memory_live_sub_lm_skip_metadata(
-                &mut report,
-                "memory-agent/memory$verify-fact",
-                None,
-            );
+            insert_memory_live_sub_lm_skip_metadata(&mut report, projection, None);
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
     };
+
+    if let Some(mode) = memory_sub_llm_mode(projection, &options)? {
+        let input = serde_json::json!({
+            "fact": fact_value,
+            "fresh-recall": fresh_recall,
+            "evidence": evidence,
+        });
+        let system = memory_verify_fact_system_prompt();
+        return print_memory_verify_fact_bedrock(
+            projection,
+            mode,
+            input,
+            system,
+            &options,
+            fresh_recall.len(),
+            evidence.len(),
+        );
+    }
+
     let confidence = fact_value
         .as_object()
         .and_then(|object| rlm_map_get(object, "confidence"))
@@ -13839,14 +14044,13 @@ fn print_memory_verify_fact(fact: String, fresh_recall: String, evidence: String
         "verdict": serde_json::Value::Null,
         "refined-content": "",
         "new-confidence": confidence,
-        "rationale": "",
         "reasoning": serde_json::Value::Null,
         "error": "memory$verify-fact requires a live sub-LM; by-rs projected the input contract only",
         "fact": fact_value,
         "fresh-recall-bytes": fresh_recall.len(),
         "evidence-bytes": evidence.len(),
     });
-    insert_memory_live_sub_lm_skip_metadata(&mut report, "memory-agent/memory$verify-fact", None);
+    insert_memory_live_sub_lm_skip_metadata(&mut report, projection, None);
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
 }
@@ -13856,22 +14060,21 @@ fn print_memory_llm_consolidate(
     window_desc: String,
     existing_l3_hits: String,
     user_id: Option<String>,
+    options: SubLlmRunOptions,
 ) -> Result<()> {
     let resolved_user_id = resolve_memory_user_id(user_id.as_deref());
+    let projection = "memory-agent/memory$llm-consolidate";
     let episodes_value = match parse_rlm_json_or_edn(&episodes) {
-        Ok(value) if value.is_array() => value,
+        Ok(value) if value.as_array().is_some() => value,
         Ok(_) => {
             let mut report = serde_json::json!({
                 "facts": [],
                 "reasoning": serde_json::Value::Null,
                 "error": "episodes must be a JSON or EDN vector",
-                "episode-count": 0,
-                "window-desc": window_desc,
-                "existing-l3-hits-bytes": existing_l3_hits.len(),
             });
             insert_memory_live_sub_lm_skip_metadata(
                 &mut report,
-                "memory-agent/memory$llm-consolidate",
+                projection,
                 Some(&resolved_user_id),
             );
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -13881,21 +14084,38 @@ fn print_memory_llm_consolidate(
             let mut report = serde_json::json!({
                 "facts": [],
                 "reasoning": serde_json::Value::Null,
-                "error": format!("failed to parse episodes as JSON or EDN: {error}"),
-                "episode-count": 0,
-                "window-desc": window_desc,
-                "existing-l3-hits-bytes": existing_l3_hits.len(),
+                "error": error.to_string(),
             });
             insert_memory_live_sub_lm_skip_metadata(
                 &mut report,
-                "memory-agent/memory$llm-consolidate",
+                projection,
                 Some(&resolved_user_id),
             );
             println!("{}", serde_json::to_string_pretty(&report)?);
             return Ok(());
         }
     };
-    let episode_count = episodes_value.as_array().map(Vec::len).unwrap_or(0);
+
+    if let Some(mode) = memory_sub_llm_mode(projection, &options)? {
+        let input = serde_json::json!({
+            "episodes": episodes_value,
+            "window-desc": window_desc,
+            "existing-l3-hits": memory_nonempty_lines(&existing_l3_hits),
+            "user-id": resolved_user_id,
+        });
+        let system = memory_llm_consolidate_system_prompt();
+        return print_memory_llm_consolidate_bedrock(
+            projection,
+            mode,
+            input,
+            system,
+            &options,
+            window_desc.len(),
+            existing_l3_hits.len(),
+        );
+    }
+
+    let episode_count = episodes_value.as_array().map_or(0, Vec::len);
     let mut report = serde_json::json!({
         "facts": [],
         "reasoning": serde_json::Value::Null,
@@ -13903,15 +14123,395 @@ fn print_memory_llm_consolidate(
         "episodes": episodes_value,
         "episode-count": episode_count,
         "window-desc": window_desc,
+        "window-desc-bytes": window_desc.len(),
         "existing-l3-hits-bytes": existing_l3_hits.len(),
     });
-    insert_memory_live_sub_lm_skip_metadata(
-        &mut report,
-        "memory-agent/memory$llm-consolidate",
-        Some(&resolved_user_id),
-    );
+    insert_memory_live_sub_lm_skip_metadata(&mut report, projection, Some(&resolved_user_id));
     println!("{}", serde_json::to_string_pretty(&report)?);
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum MemorySubLlmMode {
+    DryRun,
+    Live,
+}
+
+#[derive(Clone, Copy)]
+struct MemoryEssenceByteCounts {
+    turn_summary: usize,
+    turn_messages: usize,
+    recent_episodes: usize,
+}
+
+fn memory_sub_llm_mode(
+    projection: &str,
+    options: &SubLlmRunOptions,
+) -> Result<Option<MemorySubLlmMode>> {
+    if options.dry_run && options.live {
+        print_query_live_projection_error(projection, "supply --dry-run OR --live, not both")?;
+        return Ok(None);
+    }
+    if !options.dry_run && !options.live {
+        return Ok(None);
+    }
+    if options.provider != "bedrock" {
+        print_query_live_projection_error(
+            projection,
+            format!(
+                "unsupported live memory sub-LM provider '{}'; by-rs currently supports bedrock",
+                options.provider
+            ),
+        )?;
+        return Ok(None);
+    }
+    if options.dry_run {
+        Ok(Some(MemorySubLlmMode::DryRun))
+    } else {
+        Ok(Some(MemorySubLlmMode::Live))
+    }
+}
+
+fn memory_nonempty_lines(value: &str) -> Vec<String> {
+    value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn print_memory_essence_extract_bedrock(
+    projection: &str,
+    mode: MemorySubLlmMode,
+    input: serde_json::Value,
+    system: &'static str,
+    options: &SubLlmRunOptions,
+    byte_counts: MemoryEssenceByteCounts,
+) -> Result<()> {
+    let result = memory_bedrock_sub_llm(projection, mode, system, &input, options)?;
+    let mut report = memory_bedrock_report(projection, mode, &input, &result);
+    let object = report
+        .as_object_mut()
+        .context("memory Bedrock report must be an object")?;
+    object.insert(
+        "turn-summary-bytes".to_string(),
+        serde_json::json!(byte_counts.turn_summary),
+    );
+    object.insert(
+        "turn-messages-bytes".to_string(),
+        serde_json::json!(byte_counts.turn_messages),
+    );
+    object.insert(
+        "recent-episodes-bytes".to_string(),
+        serde_json::json!(byte_counts.recent_episodes),
+    );
+    if let Some(parsed) = result.parsed.as_ref() {
+        object.insert(
+            "essences".to_string(),
+            memory_array_field(parsed, "essences"),
+        );
+        object.insert(
+            "reasoning".to_string(),
+            memory_optional_field(parsed, &["reasoning", "rationale"]),
+        );
+    } else {
+        object.insert("essences".to_string(), serde_json::json!([]));
+        object.insert("reasoning".to_string(), serde_json::Value::Null);
+    }
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn print_memory_verify_fact_bedrock(
+    projection: &str,
+    mode: MemorySubLlmMode,
+    input: serde_json::Value,
+    system: &'static str,
+    options: &SubLlmRunOptions,
+    fresh_recall_bytes: usize,
+    evidence_bytes: usize,
+) -> Result<()> {
+    let result = memory_bedrock_sub_llm(projection, mode, system, &input, options)?;
+    let mut report = memory_bedrock_report(projection, mode, &input, &result);
+    let object = report
+        .as_object_mut()
+        .context("memory Bedrock report must be an object")?;
+    object.insert(
+        "fresh-recall-bytes".to_string(),
+        serde_json::json!(fresh_recall_bytes),
+    );
+    object.insert(
+        "evidence-bytes".to_string(),
+        serde_json::json!(evidence_bytes),
+    );
+    if let Some(parsed) = result.parsed.as_ref() {
+        let confidence = memory_optional_field(parsed, &["new-confidence", "new_confidence"]);
+        object.insert(
+            "verdict".to_string(),
+            memory_optional_field(parsed, &["verdict"]),
+        );
+        object.insert(
+            "refined-content".to_string(),
+            memory_optional_field(parsed, &["refined-content", "refined_content"]),
+        );
+        object.insert("new-confidence".to_string(), confidence);
+        object.insert(
+            "reasoning".to_string(),
+            memory_optional_field(parsed, &["rationale", "reasoning"]),
+        );
+    } else {
+        object.insert("verdict".to_string(), serde_json::Value::Null);
+        object.insert("refined-content".to_string(), serde_json::Value::Null);
+        object.insert("new-confidence".to_string(), serde_json::Value::Null);
+        object.insert("reasoning".to_string(), serde_json::Value::Null);
+    }
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn print_memory_llm_consolidate_bedrock(
+    projection: &str,
+    mode: MemorySubLlmMode,
+    input: serde_json::Value,
+    system: &'static str,
+    options: &SubLlmRunOptions,
+    window_desc_bytes: usize,
+    existing_l3_hits_bytes: usize,
+) -> Result<()> {
+    let result = memory_bedrock_sub_llm(projection, mode, system, &input, options)?;
+    let mut report = memory_bedrock_report(projection, mode, &input, &result);
+    let object = report
+        .as_object_mut()
+        .context("memory Bedrock report must be an object")?;
+    object.insert(
+        "window-desc-bytes".to_string(),
+        serde_json::json!(window_desc_bytes),
+    );
+    object.insert(
+        "existing-l3-hits-bytes".to_string(),
+        serde_json::json!(existing_l3_hits_bytes),
+    );
+    if let Some(parsed) = result.parsed.as_ref() {
+        object.insert("facts".to_string(), memory_array_field(parsed, "facts"));
+        object.insert(
+            "reasoning".to_string(),
+            memory_optional_field(parsed, &["reasoning", "rationale"]),
+        );
+    } else {
+        object.insert("facts".to_string(), serde_json::json!([]));
+        object.insert("reasoning".to_string(), serde_json::Value::Null);
+    }
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+struct MemoryBedrockSubLlmResult {
+    model: String,
+    runtime: by_llm::BedrockRuntimeOptions,
+    request: serde_json::Value,
+    response: Option<by_llm::BedrockConverseResponse>,
+    parsed: Option<serde_json::Value>,
+    parse_error: Option<String>,
+}
+
+fn memory_bedrock_sub_llm(
+    projection: &str,
+    mode: MemorySubLlmMode,
+    system: &str,
+    input: &serde_json::Value,
+    options: &SubLlmRunOptions,
+) -> Result<MemoryBedrockSubLlmResult> {
+    let model = options
+        .model
+        .clone()
+        .unwrap_or_else(|| QUERY_LLM_DEFAULT_BEDROCK_MODEL.to_string());
+    let runtime = resolve_sub_llm_bedrock_runtime(
+        &model,
+        options.region.clone(),
+        options.aws_profile.clone(),
+    )?;
+    let config = by_llm::BedrockConfig {
+        model: model.clone(),
+        temperature: Some(options.temperature),
+        max_tokens: Some(
+            options
+                .max_tokens
+                .unwrap_or(MEMORY_SUB_LLM_DEFAULT_MAX_TOKENS),
+        ),
+        prompt_cache: !options.no_prompt_cache && by_llm::bedrock_supports_prompt_cache(&model),
+        drop_temperature: by_llm::bedrock_drops_temperature(&model),
+    };
+    let input_text = serde_json::to_string_pretty(input)?;
+    let messages = vec![
+        by_llm::ChatMessage::system(system.to_string()),
+        by_llm::ChatMessage::user(input_text),
+    ];
+    let request = by_llm::build_bedrock_request(&config, &messages);
+    match mode {
+        MemorySubLlmMode::DryRun => Ok(MemoryBedrockSubLlmResult {
+            model,
+            runtime,
+            request,
+            response: None,
+            parsed: None,
+            parse_error: None,
+        }),
+        MemorySubLlmMode::Live => {
+            let tokio_runtime = tokio::runtime::Runtime::new().with_context(|| {
+                format!("failed to create Tokio runtime for {projection} Bedrock live call")
+            })?;
+            let response = tokio_runtime.block_on(by_llm::converse_bedrock(
+                by_llm::BedrockConverseRequest {
+                    config,
+                    runtime: runtime.clone(),
+                    messages,
+                    cache_zones: Vec::new(),
+                },
+            ))?;
+            let (parsed, parse_error) = match parse_sub_llm_json_response(&response.text) {
+                Ok(value) => (Some(value), None),
+                Err(error) => (None, Some(error)),
+            };
+            Ok(MemoryBedrockSubLlmResult {
+                model,
+                runtime,
+                request,
+                response: Some(response),
+                parsed,
+                parse_error,
+            })
+        }
+    }
+}
+
+fn memory_bedrock_report(
+    projection: &str,
+    mode: MemorySubLlmMode,
+    input: &serde_json::Value,
+    result: &MemoryBedrockSubLlmResult,
+) -> serde_json::Value {
+    let (source, network) = match mode {
+        MemorySubLlmMode::DryRun => ("bedrock-dry-run", false),
+        MemorySubLlmMode::Live => ("bedrock-live", true),
+    };
+    let mut report = serde_json::json!({
+        "projection": projection,
+        "source": source,
+        "network": network,
+        "live-skipped?": false,
+        "current-agent-skipped?": false,
+        "input-contract-only?": false,
+        "sub-lm-live-skipped?": false,
+        "provider": "bedrock",
+        "model": result.model,
+        "region": result.runtime.region,
+        "aws_profile": result.runtime.aws_profile,
+        "request": result.request,
+        "input": input,
+    });
+    if let serde_json::Value::Object(ref mut object) = report {
+        match result.response.as_ref() {
+            Some(response) => {
+                object.insert("result".to_string(), serde_json::json!(response.text));
+                object.insert("raw".to_string(), response.raw.clone());
+                object.insert("response".to_string(), response.projected.clone());
+                object.insert(
+                    "stop_reason".to_string(),
+                    serde_json::json!(response.stop_reason),
+                );
+            }
+            None => {
+                object.insert("result".to_string(), serde_json::Value::Null);
+            }
+        }
+        if let Some(parsed) = result.parsed.as_ref() {
+            object.insert("output".to_string(), parsed.clone());
+        }
+        if let Some(parse_error) = result.parse_error.as_ref() {
+            object.insert("parse-error".to_string(), serde_json::json!(parse_error));
+        }
+    }
+    report
+}
+
+fn parse_sub_llm_json_response(text: &str) -> std::result::Result<serde_json::Value, String> {
+    let fenced = strip_json_code_fence(text);
+    match serde_json::from_str::<serde_json::Value>(&fenced) {
+        Ok(value) => Ok(value),
+        Err(first_error) => {
+            let start = fenced.find('{');
+            let end = fenced.rfind('}');
+            match (start, end) {
+                (Some(start), Some(end)) if start <= end => {
+                    let candidate = &fenced[start..=end];
+                    serde_json::from_str::<serde_json::Value>(candidate).map_err(|second_error| {
+                        format!(
+                            "failed to parse sub-LM JSON output: {first_error}; extracted object failed: {second_error}"
+                        )
+                    })
+                }
+                _ => Err(format!("failed to parse sub-LM JSON output: {first_error}")),
+            }
+        }
+    }
+}
+
+fn strip_json_code_fence(text: &str) -> String {
+    let trimmed = text.trim();
+    if !trimmed.starts_with("```") {
+        return trimmed.to_string();
+    }
+    let without_opening = trimmed.lines().skip(1).collect::<Vec<_>>().join("\n");
+    match without_opening.rsplit_once("```") {
+        Some((body, _)) => body.trim().to_string(),
+        None => without_opening.trim().to_string(),
+    }
+}
+
+fn memory_optional_field(parsed: &serde_json::Value, keys: &[&str]) -> serde_json::Value {
+    keys.iter()
+        .find_map(|key| parsed.get(*key).cloned())
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn memory_array_field(parsed: &serde_json::Value, key: &str) -> serde_json::Value {
+    match parsed.get(key) {
+        Some(value @ serde_json::Value::Array(_)) => value.clone(),
+        Some(_) | None => serde_json::json!([]),
+    }
+}
+
+fn memory_essence_extract_system_prompt() -> &'static str {
+    r#"You are Brainyard memory$essence-extract.
+Return JSON only.
+Input fields: user-id, turn-summary, turn-messages, recent-episodes.
+Extract zero to three durable essences worth storing beyond the current turn.
+Prefer user-context over fact over observation. Ignore transient chatter.
+Each essence must have: kind (fact, observation, or user-context), content, tags, confidence, source-ids, rationale.
+Use this exact output shape: {"essences":[{"kind":"user-context","content":"...","tags":["..."],"confidence":0.8,"source-ids":["..."],"rationale":"..."}],"reasoning":"..."}.
+Return {"essences":[],"reasoning":"..."} when nothing durable should be stored."#
+}
+
+fn memory_verify_fact_system_prompt() -> &'static str {
+    r#"You are Brainyard memory$verify-fact.
+Return JSON only.
+Input fields: fact, fresh-recall, evidence.
+Decide whether the stored fact is still true, should be refined, or is wrong.
+Use verdict exactly one of: still-true, refine, wrong.
+Be conservative: absence of evidence is not refutation. Explicit user evidence is authoritative.
+Use this exact output shape: {"verdict":"still-true","refined-content":null,"new-confidence":0.8,"rationale":"..."}."#
+}
+
+fn memory_llm_consolidate_system_prompt() -> &'static str {
+    r#"You are Brainyard memory$llm-consolidate.
+Return JSON only.
+Input fields: episodes, window-desc, existing-l3-hits, user-id.
+Distill multiple L2 episodes into up to five stable L3 facts or observations.
+Each fact must have: content, kind (fact or observation), tags, confidence, source-episode-ids, supersedes-fact-ids.
+Avoid duplicating existing L3 hits; use supersedes-fact-ids when a new fact replaces one.
+Use this exact output shape: {"facts":[{"content":"...","kind":"fact","tags":["..."],"confidence":0.8,"source-episode-ids":["..."],"supersedes-fact-ids":[]}],"reasoning":"..."}.
+Return {"facts":[],"reasoning":"..."} when there is nothing durable to consolidate."#
 }
 
 struct MemoryPurgePlanOptions {
@@ -22815,10 +23415,39 @@ fn slack_mask_token(token: &str) -> String {
     }
 }
 
-fn print_query_llm_projection(
+#[derive(Debug)]
+struct SubLlmRunOptions {
+    provider: String,
+    model: Option<String>,
+    region: Option<String>,
+    aws_profile: Option<String>,
+    max_tokens: Option<u32>,
+    temperature: f64,
+    no_prompt_cache: bool,
+    dry_run: bool,
+    live: bool,
+}
+
+#[derive(Debug)]
+enum QueryLlmInput {
+    Single { prompt: String },
+    Batched { prompts: Vec<String> },
+}
+
+struct QueryLlmReportBase<'a> {
+    source: &'a str,
+    network: bool,
+    model: &'a str,
+    runtime: &'a by_llm::BedrockRuntimeOptions,
+    mode: &'a str,
+    sub_context: Option<&'a str>,
+}
+
+fn print_query_llm(
     prompt: Option<String>,
     prompts: Option<String>,
     sub_context: Option<String>,
+    options: SubLlmRunOptions,
 ) -> Result<()> {
     let has_prompt = prompt
         .as_deref()
@@ -22829,6 +23458,13 @@ fn print_query_llm_projection(
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false);
 
+    if options.dry_run && options.live {
+        return print_query_live_projection_error(
+            "common.commands/query$llm",
+            "supply --dry-run OR --live, not both",
+        );
+    }
+
     if has_prompt && has_prompts {
         return print_query_live_projection_error(
             "common.commands/query$llm",
@@ -22838,34 +23474,23 @@ fn print_query_llm_projection(
 
     if has_prompts {
         let raw_prompts = prompts.unwrap_or_default();
-        let prompt_values = match parse_rlm_json_or_edn(&raw_prompts) {
-            Ok(value) if value.is_array() => value,
-            Ok(_) => {
-                return print_query_live_projection_error(
-                    "common.commands/query$llm",
-                    "prompts must be a JSON or EDN vector of strings",
-                );
-            }
+        let parsed_prompts = match parse_query_llm_prompts(&raw_prompts) {
+            Ok(prompts) => prompts,
             Err(error) => {
-                return print_query_live_projection_error(
-                    "common.commands/query$llm",
-                    format!("failed to parse prompts as JSON or EDN: {error}"),
-                );
+                return print_query_live_projection_error("common.commands/query$llm", error)
             }
         };
-        let prompts_array = prompt_values.as_array().cloned().unwrap_or_default();
-        if prompts_array.is_empty() {
-            return print_query_live_projection_error(
-                "common.commands/query$llm",
-                "either :prompt (string) or :prompts (vector of strings) is required",
+
+        if options.dry_run || options.live {
+            return print_query_llm_bedrock(
+                QueryLlmInput::Batched {
+                    prompts: parsed_prompts,
+                },
+                sub_context,
+                options,
             );
         }
-        if !prompts_array.iter().all(serde_json::Value::is_string) {
-            return print_query_live_projection_error(
-                "common.commands/query$llm",
-                "prompts must be a JSON or EDN vector of strings",
-            );
-        }
+
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
@@ -22877,8 +23502,8 @@ fn print_query_llm_projection(
                 "sub-lm-live-skipped?": true,
                 "input-contract-only?": true,
                 "mode": "batched",
-                "prompt-count": prompts_array.len(),
-                "prompts": prompts_array,
+                "prompt-count": parsed_prompts.len(),
+                "prompts": parsed_prompts,
                 "sub-context-bytes": sub_context.as_deref().unwrap_or("").len(),
             }))?
         );
@@ -22887,6 +23512,10 @@ fn print_query_llm_projection(
 
     if has_prompt {
         let prompt = prompt.unwrap_or_default();
+        if options.dry_run || options.live {
+            return print_query_llm_bedrock(QueryLlmInput::Single { prompt }, sub_context, options);
+        }
+
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
@@ -22909,6 +23538,285 @@ fn print_query_llm_projection(
         "common.commands/query$llm",
         "either :prompt (string) or :prompts (vector of strings) is required",
     )
+}
+
+fn parse_query_llm_prompts(raw_prompts: &str) -> std::result::Result<Vec<String>, String> {
+    let prompt_values = match parse_rlm_json_or_edn(raw_prompts) {
+        Ok(value) if value.is_array() => value,
+        Ok(_) => return Err("prompts must be a JSON or EDN vector of strings".to_string()),
+        Err(error) => return Err(format!("failed to parse prompts as JSON or EDN: {error}")),
+    };
+    let prompt_values = prompt_values.as_array().cloned().unwrap_or_default();
+    if prompt_values.is_empty() {
+        return Err(
+            "either :prompt (string) or :prompts (vector of strings) is required".to_string(),
+        );
+    }
+
+    prompt_values
+        .into_iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(ToOwned::to_owned)
+                .ok_or_else(|| "prompts must be a JSON or EDN vector of strings".to_string())
+        })
+        .collect()
+}
+
+fn print_query_llm_bedrock(
+    input: QueryLlmInput,
+    sub_context: Option<String>,
+    options: SubLlmRunOptions,
+) -> Result<()> {
+    if options.provider != "bedrock" {
+        return print_query_live_projection_error(
+            "common.commands/query$llm",
+            "query$llm live/dry-run currently supports provider 'bedrock' only",
+        );
+    }
+
+    let model = options
+        .model
+        .unwrap_or_else(|| QUERY_LLM_DEFAULT_BEDROCK_MODEL.to_string());
+    let runtime = resolve_sub_llm_bedrock_runtime(&model, options.region, options.aws_profile)?;
+    let config = by_llm::BedrockConfig {
+        model: model.clone(),
+        temperature: Some(options.temperature),
+        max_tokens: options.max_tokens,
+        prompt_cache: !options.no_prompt_cache && by_llm::bedrock_supports_prompt_cache(&model),
+        drop_temperature: by_llm::bedrock_drops_temperature(&model),
+    };
+
+    match input {
+        QueryLlmInput::Single { prompt } => {
+            let messages = query_llm_bedrock_messages(&prompt, sub_context.as_deref());
+            let request = by_llm::build_bedrock_request(&config, &messages);
+            if options.dry_run {
+                return print_query_llm_bedrock_single_report(
+                    QueryLlmReportBase {
+                        source: "bedrock-dry-run",
+                        network: false,
+                        model: &model,
+                        runtime: &runtime,
+                        mode: "single",
+                        sub_context: sub_context.as_deref(),
+                    },
+                    &prompt,
+                    Some(request),
+                    None,
+                );
+            }
+
+            let response = tokio::runtime::Runtime::new()
+                .context("failed to create Tokio runtime for query$llm Bedrock live call")?
+                .block_on(by_llm::converse_bedrock(by_llm::BedrockConverseRequest {
+                    config,
+                    runtime: runtime.clone(),
+                    messages,
+                    cache_zones: vec![],
+                }))?;
+            print_query_llm_bedrock_single_report(
+                QueryLlmReportBase {
+                    source: "bedrock-live",
+                    network: true,
+                    model: &model,
+                    runtime: &runtime,
+                    mode: "single",
+                    sub_context: sub_context.as_deref(),
+                },
+                &prompt,
+                Some(request),
+                Some(response),
+            )
+        }
+        QueryLlmInput::Batched { prompts } => {
+            let requests = prompts
+                .iter()
+                .map(|prompt| {
+                    let messages = query_llm_bedrock_messages(prompt, sub_context.as_deref());
+                    by_llm::build_bedrock_request(&config, &messages)
+                })
+                .collect::<Vec<_>>();
+
+            if options.dry_run {
+                return print_query_llm_bedrock_batch_report(
+                    QueryLlmReportBase {
+                        source: "bedrock-dry-run",
+                        network: false,
+                        model: &model,
+                        runtime: &runtime,
+                        mode: "batched",
+                        sub_context: sub_context.as_deref(),
+                    },
+                    &prompts,
+                    requests,
+                    Vec::new(),
+                );
+            }
+
+            let tokio_runtime = tokio::runtime::Runtime::new()
+                .context("failed to create Tokio runtime for query$llm Bedrock live call")?;
+            let mut responses = Vec::with_capacity(prompts.len());
+            for prompt in &prompts {
+                let messages = query_llm_bedrock_messages(prompt, sub_context.as_deref());
+                let response = tokio_runtime.block_on(by_llm::converse_bedrock(
+                    by_llm::BedrockConverseRequest {
+                        config: config.clone(),
+                        runtime: runtime.clone(),
+                        messages,
+                        cache_zones: vec![],
+                    },
+                ))?;
+                responses.push(response);
+            }
+
+            print_query_llm_bedrock_batch_report(
+                QueryLlmReportBase {
+                    source: "bedrock-live",
+                    network: true,
+                    model: &model,
+                    runtime: &runtime,
+                    mode: "batched",
+                    sub_context: sub_context.as_deref(),
+                },
+                &prompts,
+                requests,
+                responses,
+            )
+        }
+    }
+}
+
+fn resolve_sub_llm_bedrock_runtime(
+    model: &str,
+    explicit_region: Option<String>,
+    explicit_profile: Option<String>,
+) -> Result<by_llm::BedrockRuntimeOptions> {
+    let catalog_region = bedrock_catalog_region(model)?;
+    Ok(by_llm::resolve_bedrock_runtime_options(
+        by_llm::BedrockRuntimeInputs {
+            explicit_region,
+            catalog_region,
+            aws_region: env_nonempty("AWS_REGION"),
+            aws_default_region: env_nonempty("AWS_DEFAULT_REGION"),
+            explicit_profile,
+            aws_profile: env_nonempty("AWS_PROFILE"),
+            aws_default_profile: env_nonempty("AWS_DEFAULT_PROFILE"),
+        },
+    ))
+}
+
+fn env_nonempty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn query_llm_bedrock_messages(prompt: &str, sub_context: Option<&str>) -> Vec<by_llm::ChatMessage> {
+    let mut messages = Vec::new();
+    if let Some(context) = sub_context
+        .map(str::trim)
+        .filter(|context| !context.is_empty())
+    {
+        messages.push(by_llm::ChatMessage::system(context.to_string()));
+    }
+    messages.push(by_llm::ChatMessage::user(prompt.to_string()));
+    messages
+}
+
+fn query_llm_common_report(base: &QueryLlmReportBase<'_>) -> serde_json::Value {
+    serde_json::json!({
+        "error": serde_json::Value::Null,
+        "projection": "common.commands/query$llm",
+        "source": base.source,
+        "network": base.network,
+        "live-skipped?": false,
+        "sub-lm-live-skipped?": false,
+        "input-contract-only?": false,
+        "mode": base.mode,
+        "provider": "bedrock",
+        "model": base.model,
+        "region": base.runtime.region,
+        "aws_profile": base.runtime.aws_profile,
+        "sub-context-bytes": base.sub_context.unwrap_or("").len(),
+    })
+}
+
+fn print_query_llm_bedrock_single_report(
+    base: QueryLlmReportBase<'_>,
+    prompt: &str,
+    request: Option<serde_json::Value>,
+    response: Option<by_llm::BedrockConverseResponse>,
+) -> Result<()> {
+    let mut report = query_llm_common_report(&base);
+    let object = report
+        .as_object_mut()
+        .context("query$llm single report should be a JSON object")?;
+    object.insert("prompt-bytes".to_string(), serde_json::json!(prompt.len()));
+    object.insert(
+        "result".to_string(),
+        response
+            .as_ref()
+            .map(|response| serde_json::json!(response.text))
+            .unwrap_or(serde_json::Value::Null),
+    );
+    if let Some(request) = request {
+        object.insert("request".to_string(), request);
+    }
+    if let Some(response) = response {
+        object.insert(
+            "stop_reason".to_string(),
+            serde_json::json!(response.stop_reason),
+        );
+        object.insert("response".to_string(), response.projected);
+        object.insert("raw".to_string(), response.raw);
+    }
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
+}
+
+fn print_query_llm_bedrock_batch_report(
+    base: QueryLlmReportBase<'_>,
+    prompts: &[String],
+    requests: Vec<serde_json::Value>,
+    responses: Vec<by_llm::BedrockConverseResponse>,
+) -> Result<()> {
+    let mut report = query_llm_common_report(&base);
+    let object = report
+        .as_object_mut()
+        .context("query$llm batch report should be a JSON object")?;
+    object.insert("prompt-count".to_string(), serde_json::json!(prompts.len()));
+    object.insert("prompts".to_string(), serde_json::json!(prompts));
+    object.insert("requests".to_string(), serde_json::Value::Array(requests));
+    object.insert(
+        "results".to_string(),
+        serde_json::json!(responses
+            .iter()
+            .map(|response| &response.text)
+            .collect::<Vec<_>>()),
+    );
+    if !responses.is_empty() {
+        object.insert(
+            "responses".to_string(),
+            serde_json::Value::Array(
+                responses
+                    .into_iter()
+                    .map(|response| {
+                        serde_json::json!({
+                            "text": response.text,
+                            "stop_reason": response.stop_reason,
+                            "response": response.projected,
+                            "raw": response.raw,
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    Ok(())
 }
 
 fn print_query_clone_projection(

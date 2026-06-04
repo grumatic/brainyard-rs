@@ -5915,6 +5915,121 @@ fn memory_llm_consolidate_projects_live_sub_lm_skip_without_live_agent() {
 }
 
 #[test]
+fn memory_essence_extract_bedrock_dry_run_prepares_sub_lm_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "memory",
+            "essence-extract",
+            "--dry-run",
+            "--model",
+            "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "--region",
+            "ap-northeast-2",
+            "--aws-profile",
+            "grumatic",
+            "--max-tokens",
+            "64",
+            "--user-id",
+            "u1",
+            "--turn-summary",
+            "User prefers blue deploys.",
+            "--turn-messages",
+            "user: deploy color should be blue",
+            "--recent-episodes",
+            "ep1 user-context blue deploy preference",
+        ])
+        .assert()
+        .success();
+    let report: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(report["projection"], "memory-agent/memory$essence-extract");
+    assert_eq!(report["source"], "bedrock-dry-run");
+    assert_eq!(report["network"], false);
+    assert_eq!(report["live-skipped?"], false);
+    assert_eq!(report["input"]["user-id"], "u1");
+    assert_eq!(
+        report["request"]["modelId"],
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
+    assert_eq!(report["request"]["inferenceConfig"]["maxTokens"], 64);
+    assert_eq!(report["request"]["messages"].as_array().unwrap().len(), 1);
+    assert!(!report["request"]["system"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn memory_verify_fact_bedrock_dry_run_prepares_sub_lm_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "memory",
+            "verify-fact",
+            "--dry-run",
+            "--model",
+            "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "--region",
+            "ap-northeast-2",
+            "--aws-profile",
+            "grumatic",
+            "--max-tokens",
+            "80",
+            "--fact",
+            r#"{"id":"fact-blue","content":"User likes blue deploys","confidence":0.7}"#,
+            "--fresh-recall",
+            "User confirmed blue deploys today.",
+            "--evidence",
+            "direct user message",
+        ])
+        .assert()
+        .success();
+    let report: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(report["projection"], "memory-agent/memory$verify-fact");
+    assert_eq!(report["source"], "bedrock-dry-run");
+    assert_eq!(report["network"], false);
+    assert_eq!(report["input"]["fact"]["id"], "fact-blue");
+    assert_eq!(report["request"]["inferenceConfig"]["maxTokens"], 80);
+    assert_eq!(report["request"]["messages"].as_array().unwrap().len(), 1);
+    assert!(!report["request"]["system"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn memory_llm_consolidate_bedrock_dry_run_prepares_sub_lm_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "memory",
+            "llm-consolidate",
+            "--dry-run",
+            "--model",
+            "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "--region",
+            "ap-northeast-2",
+            "--aws-profile",
+            "grumatic",
+            "--max-tokens",
+            "96",
+            "--episodes",
+            r#"[{"id":"ep1","content":"User asked to keep deploys blue","tags":["deploy"],"created-at":1}]"#,
+            "--window-desc",
+            "session s1 first window",
+            "--existing-l3-hits",
+            "fact-blue old blue preference",
+            "--user-id",
+            "u1",
+        ])
+        .assert()
+        .success();
+    let report: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout).unwrap();
+    assert_eq!(report["projection"], "memory-agent/memory$llm-consolidate");
+    assert_eq!(report["source"], "bedrock-dry-run");
+    assert_eq!(report["network"], false);
+    assert_eq!(report["input"]["user-id"], "u1");
+    assert_eq!(report["input"]["episodes"].as_array().unwrap().len(), 1);
+    assert_eq!(report["request"]["inferenceConfig"]["maxTokens"], 96);
+    assert_eq!(report["request"]["messages"].as_array().unwrap().len(), 1);
+    assert!(!report["request"]["system"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn memory_purge_plan_projects_candidate_report_without_live_registry() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("memory.db");
@@ -9991,6 +10106,64 @@ fn query_llm_and_clone_project_live_skip_contracts() {
         serde_json::from_slice(&assert.get_output().stdout).expect("blank clone json");
     assert_eq!(blank["projection"], "common.commands/query$clone");
     assert_eq!(blank["error"], "query is required");
+}
+
+#[test]
+fn query_llm_bedrock_dry_run_prepares_sub_lm_request_without_network() {
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .args([
+            "query",
+            "llm",
+            "--dry-run",
+            "--provider",
+            "bedrock",
+            "--model",
+            "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+            "--region",
+            "ap-northeast-2",
+            "--aws-profile",
+            "grumatic",
+            "--max-tokens",
+            "24",
+            "--prompt",
+            "Reply with exactly: BY_RS_QUERY_LLM_DRY_OK",
+            "--sub-context",
+            "Return no extra text.",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let report: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout)
+        .expect("query llm bedrock dry-run json");
+    assert_eq!(report["projection"], "common.commands/query$llm");
+    assert_eq!(report["source"], "bedrock-dry-run");
+    assert_eq!(report["network"], false);
+    assert_eq!(report["live-skipped?"], false);
+    assert_eq!(report["sub-lm-live-skipped?"], false);
+    assert_eq!(report["input-contract-only?"], false);
+    assert_eq!(report["provider"], "bedrock");
+    assert_eq!(
+        report["model"],
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
+    assert_eq!(report["region"], "ap-northeast-2");
+    assert_eq!(report["aws_profile"], "grumatic");
+    assert_eq!(report["mode"], "single");
+    assert_eq!(
+        report["prompt-bytes"].as_u64().unwrap(),
+        "Reply with exactly: BY_RS_QUERY_LLM_DRY_OK".len() as u64
+    );
+    assert!(report["sub-context-bytes"].as_u64().unwrap() > 0);
+    assert!(report["result"].is_null());
+    assert_eq!(
+        report["request"]["modelId"],
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    );
+    assert_eq!(report["request"]["inferenceConfig"]["maxTokens"], 24);
+    assert_eq!(report["request"]["messages"].as_array().unwrap().len(), 1);
+    assert!(!report["request"]["system"].as_array().unwrap().is_empty());
 }
 
 #[test]
