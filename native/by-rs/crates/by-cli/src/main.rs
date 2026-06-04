@@ -37662,6 +37662,12 @@ fn print_run_intro_dim_line(text: &str, inner_width: usize) {
     );
 }
 
+fn wait_for_run_input_stream() -> ! {
+    loop {
+        std::thread::park_timeout(Duration::from_secs(3600));
+    }
+}
+
 fn print_run_interactive(args: RunInteractiveRequest) -> Result<()> {
     let session_id = args
         .session_selection
@@ -37681,12 +37687,17 @@ fn print_run_interactive(args: RunInteractiveRequest) -> Result<()> {
     let mut line = String::new();
     let mut verbosity = "normal";
     let mut effort = "low";
+    let mut received_input = false;
     loop {
         line.clear();
         let read = stdin.read_line(&mut line)?;
         if read == 0 {
+            if !received_input {
+                wait_for_run_input_stream();
+            }
             break;
         }
+        received_input = true;
 
         let input = line.trim();
         if input.is_empty() {

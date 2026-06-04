@@ -3,6 +3,9 @@ use by_persist::list_sessions;
 use predicates::prelude::*;
 use rusqlite::Connection;
 use std::path::Path;
+use std::process::{Command as StdCommand, Stdio};
+use std::thread;
+use std::time::Duration;
 
 const TMUX_NEED_SESSION_GUIDANCE: &str =
     "You passed --with-tmux, but you're not currently inside a tmux session.
@@ -179,6 +182,7 @@ fn no_args_defaults_to_run_command() {
         .unwrap()
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "agt-default")
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -214,6 +218,32 @@ fn run_loop_reads_until_quit_command() {
 
     let meta = read_session_meta(home.path(), "agt-run-loop-quit");
     assert!(meta.contains(":agent-id :coact-agent"));
+}
+
+#[test]
+fn run_with_closed_stdin_stays_alive_like_tui() {
+    let home = tempfile::tempdir().unwrap();
+    let binary = assert_cmd::cargo::cargo_bin("by-rs");
+    let mut child = StdCommand::new(binary)
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-closed-stdin")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    thread::sleep(Duration::from_secs(2));
+    let observed_status = child.try_wait().unwrap();
+    assert!(
+        observed_status.is_none(),
+        "run should stay alive when launched without an input stream"
+    );
+
+    child.kill().unwrap();
+    let _ = child.wait().unwrap();
 }
 
 #[test]
@@ -267,6 +297,7 @@ fn root_level_run_flags_are_routed_to_run_command() {
             "--user-id",
             "alice",
         ])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -292,6 +323,7 @@ fn bare_agent_id_is_routed_to_run_command() {
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "agt-bare")
         .arg("coact-agent")
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -315,6 +347,7 @@ fn run_accepts_bare_resume_flag_like_clojure() {
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "agt-bare-resume")
         .args(["run", "--resume"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -358,6 +391,7 @@ fn run_explicit_existing_resume_reaches_preview_tui() {
         .unwrap()
         .env("HOME", home.path())
         .args(["run", "--resume", "alpha"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -387,6 +421,7 @@ fn run_explicit_resume_uses_session_dir_when_meta_id_is_stale() {
         .unwrap()
         .env("HOME", home.path())
         .args(["run", "--resume", "alpha"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -427,6 +462,7 @@ fn run_explicit_resume_preview_reports_persisted_message_count() {
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "ignored-for-resume")
         .args(["run", "--resume", "alpha"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("session alpha"))
@@ -442,6 +478,7 @@ fn run_select_resume_without_sessions_reaches_preview_tui_without_prompt() {
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "agt-select-empty")
         .args(["run", "--select-resume"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -464,6 +501,7 @@ fn run_select_resume_takes_precedence_over_explicit_missing_resume() {
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "agt-select-new")
         .args(["run", "--select-resume", "--resume", "missing"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -504,7 +542,7 @@ fn run_select_resume_prints_clojure_style_picker_before_tui() {
         .env("HOME", home.path())
         .env("BRAINYARD_SESSION_ID", "agt-picked-new")
         .args(["run", "--select-resume"])
-        .write_stdin("N\n")
+        .write_stdin("N\n/quit\n")
         .assert()
         .success()
         .stderr(predicate::str::is_empty());
@@ -613,6 +651,7 @@ fn run_with_tmux_live_server_reaches_preview_tui() {
         .env("PATH", path_dir.path())
         .env("TMUX", "/tmp/live,123,0")
         .args(["run", "--with-tmux"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
@@ -638,6 +677,7 @@ fn run_no_with_tmux_does_not_trigger_tmux_preflight() {
         .env("PATH", path_dir.path())
         .env_remove("TMUX")
         .args(["run", "--no-with-tmux"])
+        .write_stdin("/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
