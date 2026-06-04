@@ -96,6 +96,46 @@ fn run_init_show_without_docs_matches_oracle() {
 }
 
 #[test]
+fn run_init_show_with_docs_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    write_init_show_fixture(oracle_home.path());
+    write_init_show_fixture(rust_home.path());
+
+    let expected = run_command(
+        &oracle,
+        ["run", "--inline"],
+        "/init show\n/quit\n",
+        oracle_home.path(),
+    );
+    let by_rs = by_rs_binary();
+    let actual = run_command(
+        &by_rs,
+        ["run", "--inline"],
+        "/init show\n/quit\n",
+        rust_home.path(),
+    );
+
+    assert_eq!(expected.status_code, actual.status_code);
+    assert_eq!(expected.timed_out, actual.timed_out);
+    assert_eq!(
+        normalize_output(&expected.stdout, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stdout, oracle_home.path(), rust_home.path()),
+        "stdout mismatch for non-empty /init show"
+    );
+    assert_eq!(
+        normalize_output(&expected.stderr, oracle_home.path(), rust_home.path()),
+        normalize_output(&actual.stderr, oracle_home.path(), rust_home.path()),
+        "stderr mismatch for non-empty /init show"
+    );
+}
+
+#[test]
 fn run_init_list_snapshots_empty_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
@@ -225,6 +265,16 @@ fn write_init_revert_fixture(home: &Path) -> PathBuf {
     let snapshot = snapshot_dir.join("20260102-030405-project-test-snapshot.md");
     std::fs::write(&snapshot, "# Restored\n").expect("write restore snapshot");
     snapshot
+}
+
+fn write_init_show_fixture(home: &Path) {
+    let brainyard_dir = home.join(".brainyard");
+    std::fs::create_dir_all(&brainyard_dir).expect("create brainyard dir");
+    std::fs::write(
+        brainyard_dir.join("BRAINYARD.md"),
+        "# Brainyard\n\n## Notes\nProject note\n",
+    )
+    .expect("write brainyard doc");
 }
 
 #[test]
