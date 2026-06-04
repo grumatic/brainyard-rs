@@ -8936,14 +8936,28 @@ fn print_ask(args: AskRequest) -> Result<()> {
         return Ok(());
     }
 
-    let response = tokio::runtime::Runtime::new()
+    println!(
+        "\x1b[2mLM configured: {} / {}\x1b[0m",
+        resolved_provider, model
+    );
+
+    let response = match tokio::runtime::Runtime::new()
         .context("failed to create Tokio runtime for Bedrock live call")?
         .block_on(by_llm::converse_bedrock(by_llm::BedrockConverseRequest {
             config,
             runtime,
             messages,
             cache_zones: Vec::new(),
-        }))?;
+        })) {
+        Ok(response) => response,
+        Err(error) => {
+            println!(
+                "Agent stopped: Bedrock invoke failed: {}",
+                clojure_bedrock_invoke_error_message(&error)
+            );
+            return Ok(());
+        }
+    };
 
     if response.text.is_empty() {
         println!("{}", serde_json::to_string_pretty(&response.projected)?);
@@ -8951,6 +8965,24 @@ fn print_ask(args: AskRequest) -> Result<()> {
         println!("{}", response.text);
     }
     Ok(())
+}
+
+fn clojure_bedrock_invoke_error_message(error: &anyhow::Error) -> String {
+    let mut message = error
+        .chain()
+        .map(ToString::to_string)
+        .find(|message| message.contains("AccessDeniedException: "))
+        .unwrap_or_else(|| error.to_string());
+    if let Some((_, suffix)) = message.split_once("AccessDeniedException: ") {
+        message = suffix.to_string();
+    }
+    if let Some(stripped) = message.strip_suffix(" AccessDeniedException:") {
+        message = stripped.to_string();
+    }
+    if let Some(stripped) = message.strip_suffix(" See the documentation for more information.") {
+        message = stripped.to_string();
+    }
+    message.trim().to_string()
 }
 
 fn resolve_ask_max_iterations(
@@ -38989,6 +39021,20 @@ fn default_user_tools_root() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn bedrock_invoke_error_message_strips_aws_access_denied_wrapper() {
+        let error = anyhow::anyhow!(
+            "service error: AccessDeniedException: You invoked an unsupported model or your request did not allow prompt caching. \
+             See the documentation for more information. AccessDeniedException:"
+        )
+        .context("failed to call Bedrock Converse in us-east-1");
+
+        assert_eq!(
+            clojure_bedrock_invoke_error_message(&error),
+            "You invoked an unsupported model or your request did not allow prompt caching."
+        );
+    }
 
     fn session(id: &str, label: &str, agent: &str, bytes: u64) -> by_persist::SessionSummary {
         by_persist::SessionSummary {
