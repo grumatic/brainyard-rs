@@ -37844,6 +37844,10 @@ fn run_init_show_args(args: &str) -> bool {
     matches!(args.split_whitespace().next(), Some("show" | "read"))
 }
 
+fn run_init_list_snapshots_args(args: &str) -> bool {
+    matches!(args.split_whitespace().next(), Some("list-snapshots"))
+}
+
 fn print_run_init_show_slash_command(input: &str) {
     print_run_command_header(input);
     match render_run_init_show() {
@@ -37893,6 +37897,90 @@ fn render_run_init_show_scope(dirs: &InitDocDirs, scope: &str) -> Result<String>
     Ok(format!(
         "{header}\n\x1b[2msize: {size} B, sections: {sections}\x1b[0m\n\n{content}\n"
     ))
+}
+
+fn print_run_init_list_snapshots_slash_command(input: &str, args: &str) {
+    print_run_command_header(input);
+    match render_run_init_list_snapshots(args) {
+        Ok(block) => println!("{block}"),
+        Err(error) => print_run_warning_line(&format!("Init snapshots error: {error}")),
+    }
+}
+
+struct RunInitListSnapshotsOptions {
+    scope: String,
+    limit: usize,
+}
+
+fn parse_run_init_list_snapshots_options(args: &str) -> RunInitListSnapshotsOptions {
+    let mut scope = "both".to_string();
+    let mut limit = 20;
+    let mut tokens = args.split_whitespace().skip(1);
+    while let Some(token) = tokens.next() {
+        match token {
+            "--scope" | ":scope" => {
+                if let Some(value) = tokens.next() {
+                    scope = value.to_string();
+                }
+            }
+            "--limit" | ":limit" => {
+                if let Some(value) = tokens.next().and_then(|value| value.parse::<usize>().ok()) {
+                    limit = value;
+                }
+            }
+            value if value.starts_with("--scope=") => {
+                scope = value.trim_start_matches("--scope=").to_string();
+            }
+            value if value.starts_with("--limit=") => {
+                if let Ok(value) = value.trim_start_matches("--limit=").parse::<usize>() {
+                    limit = value;
+                }
+            }
+            _ => {}
+        }
+    }
+    RunInitListSnapshotsOptions { scope, limit }
+}
+
+fn render_run_init_list_snapshots(args: &str) -> Result<String> {
+    let options = parse_run_init_list_snapshots_options(args);
+    let scopes = init_doc_parse_scopes(&options.scope).map_err(anyhow::Error::msg)?;
+    let mut dirs = init_doc_dirs(None, None)?;
+    dirs.user_dir = system_user_home_dir().or(dirs.user_dir);
+    let mut records = Vec::new();
+    for scope in scopes {
+        if let Some(base) = init_doc_scope_dir(&dirs, &scope) {
+            records.extend(init_doc_snapshot_records(&base, Some(&scope))?);
+        }
+    }
+    records.sort_by(|left, right| {
+        right
+            .ts
+            .cmp(&left.ts)
+            .then_with(|| right.filename.cmp(&left.filename))
+    });
+
+    if records.is_empty() {
+        return Ok("\x1b[2m  (no snapshots)\x1b[0m".to_string());
+    }
+
+    Ok(records
+        .iter()
+        .take(options.limit)
+        .enumerate()
+        .map(|(index, record)| {
+            format!(
+                "  {:2}. \x1b[97m{}\x1b[0m \x1b[96m{}\x1b[0m {}\x1b[2m  {} B  {}\x1b[0m",
+                index + 1,
+                record.ts,
+                record.scope,
+                record.reason,
+                record.size_bytes,
+                record.path.display()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 fn run_static_slash_command_block(input: &str) -> Option<&'static str> {
@@ -38576,6 +38664,8 @@ fn handle_run_slash_command(ctx: RunSlashCommand<'_>) -> Result<bool> {
         print_run_mcp_slash_command(input, args);
     } else if command == "/config" {
         print_run_config_slash_command(input, args);
+    } else if command == "/init" && run_init_list_snapshots_args(args) {
+        print_run_init_list_snapshots_slash_command(input, args);
     } else if command == "/init" && run_init_show_args(args) {
         print_run_init_show_slash_command(input);
     } else if command == "/memory" && run_help_args(args) {

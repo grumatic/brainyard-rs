@@ -308,6 +308,37 @@ fn run_init_show_slash_reads_project_and_lists_user_scope() {
 }
 
 #[test]
+fn run_init_list_snapshots_slash_renders_project_snapshot_records() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+    let snapshot = project
+        .path()
+        .join(".brainyard/agents/init-agent/snapshots/20260102-030405-project-test-snapshot.md");
+    std::fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    std::fs::write(&snapshot, "# Prior Brainyard\n").unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_PROJECT_DIR", project.path())
+        .env("BRAINYARD_SESSION_ID", "agt-init-list-snapshots")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin("/init list-snapshots\n/quit\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("20260102-030405"));
+    assert!(stdout.contains("project"));
+    assert!(stdout.contains("test-snapshot"));
+    assert!(stdout.contains(snapshot.to_string_lossy().as_ref()));
+    assert!(!stdout.contains("Unknown slash command: /init"));
+}
+
+#[test]
 fn run_with_closed_stdin_stays_alive_like_tui() {
     let home = tempfile::tempdir().unwrap();
     let binary = assert_cmd::cargo::cargo_bin("by-rs");
