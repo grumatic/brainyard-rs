@@ -72,6 +72,20 @@ fn run_config_listing_matches_oracle() {
 }
 
 #[test]
+fn run_memory_and_init_help_match_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    assert_command_matches_oracle(
+        &oracle,
+        &["run", "--inline"],
+        "/memory help\n/init help\n/quit\n",
+    );
+}
+
+#[test]
 fn run_help_command_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;

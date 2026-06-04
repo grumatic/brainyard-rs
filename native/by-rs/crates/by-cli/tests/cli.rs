@@ -248,6 +248,33 @@ fn run_config_slash_lists_runtime_config() {
 }
 
 #[test]
+fn run_memory_and_init_help_slash_print_static_help() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_PROJECT_DIR", project.path())
+        .env("BRAINYARD_SESSION_ID", "agt-static-help")
+        .env("BY_NO_DOTENV", "1")
+        .args(["run", "--inline"])
+        .write_stdin("/memory help\n/init help\n/quit\n")
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(stdout.contains("/memory stats"));
+    assert!(stdout.contains("/memory remember <content>"));
+    assert!(stdout.contains("/init show"));
+    assert!(stdout.contains("/init --scope :user|:project|:both"));
+    assert!(!stdout.contains("Unknown slash command: /memory"));
+    assert!(!stdout.contains("Unknown slash command: /init"));
+}
+
+#[test]
 fn run_with_closed_stdin_stays_alive_like_tui() {
     let home = tempfile::tempdir().unwrap();
     let binary = assert_cmd::cargo::cargo_bin("by-rs");

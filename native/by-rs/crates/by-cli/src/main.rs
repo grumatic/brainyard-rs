@@ -37806,6 +37806,40 @@ const RUN_USAGE_BLOCK: &str = r#""#;
 
 const RUN_VERBOSE_BLOCK: &str = r#""#;
 
+const RUN_MEMORY_HELP_BLOCK: &str = r#"Usage:
+  /memory                    — same as /memory stats
+  /memory stats              — composite stats (db size, layer counts)
+  /memory remember <content> — save the rest of the line as an L3 fact
+  /memory consolidate        — LLM-driven L2 → L3 reduction over the current session
+  /memory purge              — dry-run purge plan (no tombstoning)
+  /memory purge --apply      — apply the purge plan (tombstones orphans)
+  /memory verify <fact-id>   — challenge an L3 fact against fresh recall
+  /memory correct <evidence> — user-authoritative correction; locates the
+                                offending fact by recall on <evidence>"#;
+
+const RUN_INIT_HELP_BLOCK: &str = r#"Usage:
+  /init                          — show BRAINYARD.md status; offer to seed
+                                    from CLAUDE.md / AGENTS.md if missing
+  /init <prompt>                 — update BRAINYARD.md per instruction
+                                    ("/init we use Polylith")
+  /init show                     — render both BRAINYARD.md files inline
+  /init list-snapshots [N]       — list last N snapshots (default 10)
+  /init reseed                   — re-import from CLAUDE.md / AGENTS.md,
+                                    diff against current
+  /init revert <snapshot-path>   — restore a snapshot (current is snapshotted first)
+  /init --diff                   — dry-run: show the diff init-agent would
+                                    propose, but don't write
+  /init --scope :user|:project|:both
+                                 — override the auto-scope choice (works
+                                    with all forms above)"#;
+
+fn run_help_args(args: &str) -> bool {
+    matches!(
+        args.split_whitespace().next(),
+        Some("help" | "--help" | "-h")
+    )
+}
+
 fn run_static_slash_command_block(input: &str) -> Option<&'static str> {
     match input {
         "/clear" => Some(RUN_CLEAR_BLOCK),
@@ -38487,6 +38521,10 @@ fn handle_run_slash_command(ctx: RunSlashCommand<'_>) -> Result<bool> {
         print_run_mcp_slash_command(input, args);
     } else if command == "/config" {
         print_run_config_slash_command(input, args);
+    } else if command == "/memory" && run_help_args(args) {
+        print_run_static_slash_command(input, RUN_MEMORY_HELP_BLOCK);
+    } else if command == "/init" && run_help_args(args) {
+        print_run_static_slash_command(input, RUN_INIT_HELP_BLOCK);
     } else if let Some(block) = run_static_slash_command_block(command) {
         print_run_static_slash_command(input, block);
     } else {
