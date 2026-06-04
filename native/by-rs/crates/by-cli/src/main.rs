@@ -37894,12 +37894,14 @@ fn run_init_list_snapshots_args(args: &str) -> bool {
 }
 
 fn run_init_revert_missing_args(args: &str) -> bool {
-    let mut tokens = args.split_whitespace();
+    let parsed = parse_run_init_flags(args);
+    let mut tokens = parsed.rest.split_whitespace();
     matches!(tokens.next(), Some("revert")) && tokens.next().is_none()
 }
 
-fn run_init_revert_snapshot_arg(args: &str) -> Option<&str> {
-    let trimmed = args.trim_start();
+fn run_init_revert_snapshot_arg(args: &str) -> Option<String> {
+    let parsed = parse_run_init_flags(args);
+    let trimmed = parsed.rest.trim_start();
     let rest = trimmed.strip_prefix("revert")?;
     if !rest
         .chars()
@@ -37909,7 +37911,7 @@ fn run_init_revert_snapshot_arg(args: &str) -> Option<&str> {
         return None;
     }
     let snapshot_path = rest.trim();
-    (!snapshot_path.is_empty()).then_some(snapshot_path)
+    (!snapshot_path.is_empty()).then_some(snapshot_path.to_string())
 }
 
 fn print_run_init_show_slash_command(input: &str) {
@@ -38084,7 +38086,7 @@ fn render_run_init_revert(args: &str) -> Result<String> {
         ));
     };
     let dirs = init_doc_dirs(None, None)?;
-    let chosen = match init_doc_find_snapshot(&dirs, Some(Path::new(snapshot_path)), None, None)? {
+    let chosen = match init_doc_find_snapshot(&dirs, Some(Path::new(&snapshot_path)), None, None)? {
         Ok(record) => record,
         Err(error) if error.starts_with("Snapshot not found:") => {
             return Ok(run_init_revert_lookup_error_edn(&error));

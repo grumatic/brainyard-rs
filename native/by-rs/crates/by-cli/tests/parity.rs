@@ -350,6 +350,20 @@ fn run_init_list_snapshots_default_limit_matches_oracle() {
 }
 
 #[test]
+fn run_init_revert_scope_before_subcommand_missing_snapshot_matches_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    assert_command_matches_oracle(
+        &oracle,
+        &["run", "--inline"],
+        "/init --scope :both revert missing-snapshot.md\n/quit\n",
+    );
+}
+
+#[test]
 fn run_init_revert_missing_arg_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
