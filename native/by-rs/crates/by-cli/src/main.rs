@@ -7809,6 +7809,7 @@ where
         [command, subcommand, flag]
             if command == "sessions" && subcommand == "list" && is_help_flag(flag) =>
         {
+            eprint!("{}", sessions_list_help());
             true
         }
         [command, subcommand, flag]
