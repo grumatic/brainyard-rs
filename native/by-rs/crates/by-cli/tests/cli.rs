@@ -10652,6 +10652,69 @@ fn query_llm_bedrock_dry_run_prepares_sub_lm_request_without_network() {
 }
 
 #[test]
+fn query_llm_claude_code_live_invokes_cli_and_prints_result() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let capture_path = home.path().join("query-claude-stdin.txt");
+    write_fake_executable(
+        &path_dir.path().join("claude"),
+        r#"#!/bin/sh
+cat > "$CLAUDE_CAPTURE_STDIN"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Claude query answer","usage":{"input_tokens":11,"output_tokens":12}}'
+"#,
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .env("PATH", prepend_path(path_dir.path()))
+        .env("CLAUDE_CAPTURE_STDIN", &capture_path)
+        .args([
+            "query",
+            "llm",
+            "--live",
+            "--provider",
+            "claude-code",
+            "--model",
+            "haiku",
+            "--prompt",
+            "Summarize the release risk.",
+            "--sub-context",
+            "Use only local evidence.",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty());
+
+    let report: serde_json::Value = serde_json::from_slice(&assert.get_output().stdout)
+        .expect("query llm claude-code live json");
+    assert_eq!(report["projection"], "common.commands/query$llm");
+    assert_eq!(report["source"], "claude-code-live");
+    assert_eq!(report["network"], true);
+    assert_eq!(report["provider"], "claude-code");
+    assert_eq!(report["model"], "haiku");
+    assert_eq!(report["mode"], "single");
+    assert_eq!(report["result"], "Claude query answer");
+    assert_eq!(report["stop_reason"], "end_turn");
+    assert!(report["sub-context-bytes"].as_u64().unwrap() > 0);
+    assert!(report["request"]["argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|arg| arg.as_str() == Some("--system-prompt")));
+    assert!(report["request"]["argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|arg| arg.as_str() == Some("Use only local evidence.")));
+    assert_eq!(
+        std::fs::read_to_string(capture_path).unwrap(),
+        "Summarize the release risk."
+    );
+}
+
+#[test]
 fn sandbox_metadata_helpers_are_live_free_json_projections() {
     let assert = Command::cargo_bin("by-rs")
         .unwrap()

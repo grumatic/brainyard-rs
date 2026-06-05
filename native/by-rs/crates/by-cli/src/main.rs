@@ -24052,10 +24052,40 @@ enum QueryLlmInput {
 struct QueryLlmReportBase<'a> {
     source: &'a str,
     network: bool,
+    provider: &'a str,
     model: &'a str,
-    runtime: &'a by_llm::BedrockRuntimeOptions,
+    runtime: Option<&'a by_llm::BedrockRuntimeOptions>,
     mode: &'a str,
     sub_context: Option<&'a str>,
+}
+
+struct QuerySubLlmResponse {
+    raw: serde_json::Value,
+    projected: serde_json::Value,
+    text: String,
+    stop_reason: String,
+}
+
+impl From<by_llm::BedrockConverseResponse> for QuerySubLlmResponse {
+    fn from(response: by_llm::BedrockConverseResponse) -> Self {
+        Self {
+            raw: response.raw,
+            projected: response.projected,
+            text: response.text,
+            stop_reason: response.stop_reason,
+        }
+    }
+}
+
+impl From<by_llm::ClaudeCodeResponse> for QuerySubLlmResponse {
+    fn from(response: by_llm::ClaudeCodeResponse) -> Self {
+        Self {
+            raw: response.raw,
+            projected: response.projected,
+            text: response.text,
+            stop_reason: response.stop_reason,
+        }
+    }
 }
 
 fn print_query_llm(
@@ -24184,13 +24214,21 @@ fn print_query_llm_bedrock(
     sub_context: Option<String>,
     options: SubLlmRunOptions,
 ) -> Result<()> {
-    if options.provider != "bedrock" {
-        return print_query_live_projection_error(
+    match options.provider.as_str() {
+        "bedrock" => print_query_llm_bedrock_provider(input, sub_context, options),
+        "claude-code" => print_query_llm_claude_code_provider(input, sub_context, options),
+        _ => print_query_live_projection_error(
             "common.commands/query$llm",
-            "query$llm live/dry-run currently supports provider 'bedrock' only",
-        );
+            "query$llm live/dry-run currently supports providers 'bedrock' and 'claude-code' only",
+        ),
     }
+}
 
+fn print_query_llm_bedrock_provider(
+    input: QueryLlmInput,
+    sub_context: Option<String>,
+    options: SubLlmRunOptions,
+) -> Result<()> {
     let model = options
         .model
         .unwrap_or_else(|| QUERY_LLM_DEFAULT_BEDROCK_MODEL.to_string());
@@ -24212,8 +24250,9 @@ fn print_query_llm_bedrock(
                     QueryLlmReportBase {
                         source: "bedrock-dry-run",
                         network: false,
+                        provider: "bedrock",
                         model: &model,
-                        runtime: &runtime,
+                        runtime: Some(&runtime),
                         mode: "single",
                         sub_context: sub_context.as_deref(),
                     },
@@ -24229,20 +24268,21 @@ fn print_query_llm_bedrock(
                     config,
                     runtime: runtime.clone(),
                     messages,
-                    cache_zones: vec![],
+                    cache_zones: Vec::new(),
                 }))?;
             print_query_llm_bedrock_single_report(
                 QueryLlmReportBase {
                     source: "bedrock-live",
                     network: true,
+                    provider: "bedrock",
                     model: &model,
-                    runtime: &runtime,
+                    runtime: Some(&runtime),
                     mode: "single",
                     sub_context: sub_context.as_deref(),
                 },
                 &prompt,
                 Some(request),
-                Some(response),
+                Some(response.into()),
             )
         }
         QueryLlmInput::Batched { prompts } => {
@@ -24259,8 +24299,9 @@ fn print_query_llm_bedrock(
                     QueryLlmReportBase {
                         source: "bedrock-dry-run",
                         network: false,
+                        provider: "bedrock",
                         model: &model,
-                        runtime: &runtime,
+                        runtime: Some(&runtime),
                         mode: "batched",
                         sub_context: sub_context.as_deref(),
                     },
@@ -24280,18 +24321,122 @@ fn print_query_llm_bedrock(
                         config: config.clone(),
                         runtime: runtime.clone(),
                         messages,
-                        cache_zones: vec![],
+                        cache_zones: Vec::new(),
                     },
                 ))?;
-                responses.push(response);
+                responses.push(response.into());
             }
 
             print_query_llm_bedrock_batch_report(
                 QueryLlmReportBase {
                     source: "bedrock-live",
                     network: true,
+                    provider: "bedrock",
                     model: &model,
-                    runtime: &runtime,
+                    runtime: Some(&runtime),
+                    mode: "batched",
+                    sub_context: sub_context.as_deref(),
+                },
+                &prompts,
+                requests,
+                responses,
+            )
+        }
+    }
+}
+
+fn print_query_llm_claude_code_provider(
+    input: QueryLlmInput,
+    sub_context: Option<String>,
+    options: SubLlmRunOptions,
+) -> Result<()> {
+    let model = options.model.unwrap_or_else(|| "opus".to_string());
+    let config = by_llm::ProviderChatConfig {
+        model: model.clone(),
+        temperature: Some(options.temperature),
+        max_tokens: options.max_tokens,
+        drop_temperature: false,
+    };
+
+    match input {
+        QueryLlmInput::Single { prompt } => {
+            let messages = query_llm_bedrock_messages(&prompt, sub_context.as_deref());
+            let request =
+                by_llm::build_provider_request("claude-code", &config, &messages)?.request;
+            if options.dry_run {
+                return print_query_llm_bedrock_single_report(
+                    QueryLlmReportBase {
+                        source: "claude-code-dry-run",
+                        network: false,
+                        provider: "claude-code",
+                        model: &model,
+                        runtime: None,
+                        mode: "single",
+                        sub_context: sub_context.as_deref(),
+                    },
+                    &prompt,
+                    Some(request),
+                    None,
+                );
+            }
+
+            let response = by_llm::invoke_claude_code(&config, &messages)?;
+            print_query_llm_bedrock_single_report(
+                QueryLlmReportBase {
+                    source: "claude-code-live",
+                    network: true,
+                    provider: "claude-code",
+                    model: &model,
+                    runtime: None,
+                    mode: "single",
+                    sub_context: sub_context.as_deref(),
+                },
+                &prompt,
+                Some(request),
+                Some(response.into()),
+            )
+        }
+        QueryLlmInput::Batched { prompts } => {
+            let requests = prompts
+                .iter()
+                .map(|prompt| {
+                    let messages = query_llm_bedrock_messages(prompt, sub_context.as_deref());
+                    by_llm::build_provider_request("claude-code", &config, &messages)
+                        .map(|projection| projection.request)
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            if options.dry_run {
+                return print_query_llm_bedrock_batch_report(
+                    QueryLlmReportBase {
+                        source: "claude-code-dry-run",
+                        network: false,
+                        provider: "claude-code",
+                        model: &model,
+                        runtime: None,
+                        mode: "batched",
+                        sub_context: sub_context.as_deref(),
+                    },
+                    &prompts,
+                    requests,
+                    Vec::new(),
+                );
+            }
+
+            let mut responses = Vec::with_capacity(prompts.len());
+            for prompt in &prompts {
+                let messages = query_llm_bedrock_messages(prompt, sub_context.as_deref());
+                let response = by_llm::invoke_claude_code(&config, &messages)?;
+                responses.push(response.into());
+            }
+
+            print_query_llm_bedrock_batch_report(
+                QueryLlmReportBase {
+                    source: "claude-code-live",
+                    network: true,
+                    provider: "claude-code",
+                    model: &model,
+                    runtime: None,
                     mode: "batched",
                     sub_context: sub_context.as_deref(),
                 },
@@ -24342,7 +24487,7 @@ fn query_llm_bedrock_messages(prompt: &str, sub_context: Option<&str>) -> Vec<by
 }
 
 fn query_llm_common_report(base: &QueryLlmReportBase<'_>) -> serde_json::Value {
-    serde_json::json!({
+    let mut report = serde_json::json!({
         "error": serde_json::Value::Null,
         "projection": "common.commands/query$llm",
         "source": base.source,
@@ -24350,20 +24495,32 @@ fn query_llm_common_report(base: &QueryLlmReportBase<'_>) -> serde_json::Value {
         "live-skipped?": false,
         "sub-lm-live-skipped?": false,
         "input-contract-only?": false,
-        "mode": base.mode,
-        "provider": "bedrock",
+        "provider": base.provider,
         "model": base.model,
-        "region": base.runtime.region,
-        "aws_profile": base.runtime.aws_profile,
+        "mode": base.mode,
         "sub-context-bytes": base.sub_context.unwrap_or("").len(),
-    })
+    });
+    if let Some(runtime) = base.runtime {
+        if let Some(object) = report.as_object_mut() {
+            object.insert("region".to_string(), serde_json::json!(runtime.region));
+            object.insert(
+                "aws_profile".to_string(),
+                runtime
+                    .aws_profile
+                    .as_ref()
+                    .map(|profile| serde_json::json!(profile))
+                    .unwrap_or(serde_json::Value::Null),
+            );
+        }
+    }
+    report
 }
 
 fn print_query_llm_bedrock_single_report(
     base: QueryLlmReportBase<'_>,
     prompt: &str,
     request: Option<serde_json::Value>,
-    response: Option<by_llm::BedrockConverseResponse>,
+    response: Option<QuerySubLlmResponse>,
 ) -> Result<()> {
     let mut report = query_llm_common_report(&base);
     let object = report
@@ -24396,7 +24553,7 @@ fn print_query_llm_bedrock_batch_report(
     base: QueryLlmReportBase<'_>,
     prompts: &[String],
     requests: Vec<serde_json::Value>,
-    responses: Vec<by_llm::BedrockConverseResponse>,
+    responses: Vec<QuerySubLlmResponse>,
 ) -> Result<()> {
     let mut report = query_llm_common_report(&base);
     let object = report
