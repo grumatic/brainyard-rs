@@ -8,6 +8,7 @@ runner_command="${BY_RUST_RUNNER:-${BY_RS_RUNNER:-}}"
 smoke_home="${BY_RS_BEDROCK_HOME:-}"
 keep_home=0
 mode="dry-run"
+command_kind="ask"
 model="${BY_RS_BEDROCK_MODEL:-global.anthropic.claude-haiku-4-5-20251001-v1:0}"
 region="${BY_RS_BEDROCK_REGION:-}"
 profile="${BY_RS_BEDROCK_PROFILE:-}"
@@ -19,7 +20,7 @@ host_home="${HOME:-}"
 
 usage() {
   cat <<'USAGE'
-Usage: bedrock-live-smoke.sh [--dry-run | --live] [--bin PATH | --runner COMMAND]
+Usage: bedrock-live-smoke.sh [--dry-run | --live] [--ask | --run] [--bin PATH | --runner COMMAND]
                              [--home DIR] [--keep-home] [--model MODEL]
                              [--region REGION] [--profile PROFILE]
                              [--max-tokens N] [--question TEXT]
@@ -74,6 +75,14 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --live)
       mode="live"
+      shift
+      ;;
+    --ask)
+      command_kind="ask"
+      shift
+      ;;
+    --run)
+      command_kind="run"
       shift
       ;;
     --bin)
@@ -170,53 +179,64 @@ else
 fi
 
 # bedrock-live-smoke is an internal parity/smoke harness. It intentionally
-# opts into by-rs ask projection-only flags such as --max-tokens, --region,
-# --aws-profile, and --dry-run, which are hidden from the production CLI.
+# opts into projection-only flags such as --max-tokens, --region,
+# --aws-profile, and --dry-run, which are hidden from the production ask CLI.
 export BY_RS_ALLOW_ASK_TEST_OPTIONS=1
 
-args=("ask" "-p" "bedrock" "-m" "$model" "--max-tokens" "$max_tokens" "--no-prompt-cache")
+common_args=("-p" "bedrock" "-m" "$model" "--max-tokens" "$max_tokens" "--no-prompt-cache")
 if [[ -n "$region" ]]; then
-  args+=("--region" "$region")
+  common_args+=("--region" "$region")
 fi
 if [[ -n "$profile" ]]; then
-  args+=("--aws-profile" "$profile")
+  common_args+=("--aws-profile" "$profile")
 fi
+
+case "$command_kind" in
+  ask) args=("ask" "${common_args[@]}") ;;
+  run) args=("run" "--inline" "${common_args[@]}") ;;
+  *) echo "Unknown smoke command kind: $command_kind" >&2; exit 2 ;;
+esac
 case "$mode" in
   live) ;;
   dry-run) args+=("--dry-run") ;;
   *) echo "Unknown smoke mode: $mode" >&2; exit 2 ;;
 esac
-args+=("$question")
-
-if [[ "$mode" == "live" ]]; then
-  echo "Running live Bedrock smoke via by-rs ask (isolated HOME: $smoke_home)" >&2
-else
-  echo "Running Bedrock dry-run smoke only; pass --live or set BY_RS_BEDROCK_LIVE=1 for network." >&2
+if [[ "$command_kind" != "run" || "$mode" != "live" ]]; then
+  args+=("$question")
 fi
 
-if [[ -n "$runner_command" ]]; then
-  command="$runner_command"
-  for arg in "${args[@]}"; do
-    printf -v escaped '%q' "$arg"
-    command+=" $escaped"
-  done
-  (
-    cd "$native_root"
-    configure_aws_env_for_isolated_home
-    HOME="$smoke_home" \
-    CARGO_HOME="$cargo_home" \
-    RUSTUP_HOME="$rustup_home" \
-    NO_COLOR=1 \
-      bash -lc "$command"
-  )
+target_label="by-rs ask"
+if [[ "$command_kind" == "run" ]]; then
+  target_label="by-rs run --inline"
+fi
+if [[ "$mode" == "live" ]]; then
+  echo "Running live Bedrock smoke via $target_label (isolated HOME: $smoke_home)" >&2
 else
-  (
-    cd "$native_root"
+  echo "Running Bedrock dry-run smoke via $target_label only; pass --live or set BY_RS_BEDROCK_LIVE=1 for network." >&2
+fi
+
+run_smoke_command() {
+  if [[ -n "$runner_command" ]]; then
+    command="$runner_command"
+    for arg in "${args[@]}"; do
+      printf -v escaped '%q' "$arg"
+      command+=" $escaped"
+    done
+    (
+      cd "$native_root"
+      configure_aws_env_for_isolated_home
+      HOME="$smoke_home"         CARGO_HOME="$cargo_home"         RUSTUP_HOME="$rustup_home"         NO_COLOR=1         bash -lc "$command"
+    )
+  else
     configure_aws_env_for_isolated_home
-    HOME="$smoke_home" \
-    CARGO_HOME="$cargo_home" \
-    RUSTUP_HOME="$rustup_home" \
-    NO_COLOR=1 \
-      "$bin_path" "${args[@]}"
-  )
+    HOME="$smoke_home"       CARGO_HOME="$cargo_home"       RUSTUP_HOME="$rustup_home"       NO_COLOR=1       "$bin_path" "${args[@]}"
+  fi
+}
+
+if [[ "$command_kind" == "run" && "$mode" == "live" ]]; then
+  printf '%s
+/quit
+' "$question" | run_smoke_command
+else
+  run_smoke_command
 fi

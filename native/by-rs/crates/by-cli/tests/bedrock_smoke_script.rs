@@ -136,3 +136,115 @@ printf 'ARGS=%s\n' "$*"
         .expect("fake binary should print args");
     assert!(!args_line.contains("--live"), "{stdout}");
 }
+
+#[test]
+fn bedrock_live_smoke_script_run_dry_run_uses_run_command() {
+    let script = native_root().join("scripts/bedrock-live-smoke.sh");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fake_bin = temp.path().join("by-rs");
+    std::fs::write(
+        &fake_bin,
+        r#"#!/usr/bin/env bash
+printf 'ARGS=%s\n' "$*"
+"#,
+    )
+    .expect("write fake by-rs");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&fake_bin)
+            .expect("fake metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_bin, permissions).expect("chmod fake by-rs");
+    }
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("--dry-run")
+        .arg("--run")
+        .arg("--bin")
+        .arg(&fake_bin)
+        .arg("--question")
+        .arg("Ping")
+        .env("BY_NO_DOTENV", "1")
+        .output()
+        .expect("smoke script should run with fake binary");
+
+    assert!(
+        output.status.success(),
+        "script failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let args_line = stdout
+        .lines()
+        .find(|line| line.starts_with("ARGS="))
+        .expect("fake binary should print args");
+    assert!(args_line.contains("ARGS=run"), "{stdout}");
+    assert!(args_line.contains("--inline"), "{stdout}");
+    assert!(args_line.contains("--dry-run"), "{stdout}");
+    assert!(args_line.contains("Ping"), "{stdout}");
+    assert!(!args_line.contains("ARGS=ask"), "{stdout}");
+}
+
+#[test]
+fn bedrock_live_smoke_script_run_live_feeds_question_then_quit() {
+    let script = native_root().join("scripts/bedrock-live-smoke.sh");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fake_bin = temp.path().join("by-rs");
+    std::fs::write(
+        &fake_bin,
+        r#"#!/usr/bin/env bash
+printf 'ARGS=%s\n' "$*"
+printf 'STDIN-BEGIN\n'
+cat
+printf 'STDIN-END\n'
+"#,
+    )
+    .expect("write fake by-rs");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&fake_bin)
+            .expect("fake metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_bin, permissions).expect("chmod fake by-rs");
+    }
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("--live")
+        .arg("--run")
+        .arg("--bin")
+        .arg(&fake_bin)
+        .arg("--question")
+        .arg("Ping")
+        .env("BY_NO_DOTENV", "1")
+        .output()
+        .expect("smoke script should run with fake binary");
+
+    assert!(
+        output.status.success(),
+        "script failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let args_line = stdout
+        .lines()
+        .find(|line| line.starts_with("ARGS="))
+        .expect("fake binary should print args");
+    assert!(args_line.contains("ARGS=run"), "{stdout}");
+    assert!(args_line.contains("--inline"), "{stdout}");
+    assert!(!args_line.contains("--dry-run"), "{stdout}");
+    assert!(!args_line.contains("--live"), "{stdout}");
+    assert!(
+        stdout.contains("STDIN-BEGIN\nPing\n/quit\nSTDIN-END"),
+        "{stdout}"
+    );
+}
