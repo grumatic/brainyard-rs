@@ -3956,6 +3956,39 @@ fn config_rejects_unknown_profile_like_clojure() {
 }
 
 #[test]
+fn config_bootstrap_dry_run_prints_clojure_style_human_summary_by_default() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let mut cmd = Command::cargo_bin("by-rs").unwrap();
+    scrub_config_bootstrap_provider_env(&mut cmd);
+
+    let assert = cmd
+        .env("HOME", home.path())
+        .env("PATH", path_dir.path())
+        .env("BY_NO_DOTENV", "1")
+        .args(["config", "--auto", "--profile", "dev", "--dry-run"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty())
+        .stdout(predicate::str::contains("Brainyard Environment Bootstrap"))
+        .stdout(predicate::str::contains("--auto mode (dev profile)"))
+        .stdout(predicate::str::contains(
+            "(No existing config found — starting fresh.)",
+        ))
+        .stdout(predicate::str::contains("Detecting environment..."))
+        .stdout(predicate::str::contains("Detected providers:"))
+        .stdout(predicate::str::contains("Bootstrap rung (g): Stop"))
+        .stdout(predicate::str::contains(
+            "--dry-run: not writing config.edn.",
+        ))
+        .stdout(predicate::str::contains("\"operation\": \"config\"").not());
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    assert!(!stdout.trim_start().starts_with('{'));
+    assert!(!home.path().join(".brainyard").exists());
+}
+
+#[test]
 fn config_bootstrap_projection_stays_read_only() {
     let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
@@ -3966,6 +3999,7 @@ fn config_bootstrap_projection_stays_read_only() {
         .env("HOME", home.path())
         .env("PATH", path_dir.path())
         .env("BY_NO_DOTENV", "1")
+        .env("BY_RS_CONFIG_BOOTSTRAP_JSON", "1")
         .args(["config", "--auto", "--profile", "dev", "--dry-run"])
         .assert()
         .success()
@@ -4000,6 +4034,7 @@ fn config_bootstrap_projection_reports_clojure_permission_defaults_without_writi
         .unwrap()
         .current_dir(&nested)
         .env("HOME", home.path())
+        .env("BY_RS_CONFIG_BOOTSTRAP_JSON", "1")
         .env_remove("BRAINYARD_PROJECT_DIR")
         .args(["config", "--auto", "--profile", "dev", "--dry-run"])
         .assert()
@@ -4062,6 +4097,7 @@ fn config_bootstrap_projection_chooses_api_key_rung_from_dotenv_without_exposing
         .current_dir(project.path())
         .env("HOME", home.path())
         .env("PATH", path_dir.path())
+        .env("BY_RS_CONFIG_BOOTSTRAP_JSON", "1")
         .env_remove("BY_NO_DOTENV")
         .env_remove("BRAINYARD_PROJECT_DIR")
         .args(["config", "--auto", "--profile", "ci", "--dry-run"])
@@ -4115,6 +4151,7 @@ fn config_bootstrap_projection_uses_existing_reachable_config_unless_rebootstrap
         .env("HOME", home.path())
         .env("PATH", path_dir.path())
         .env("BY_NO_DOTENV", "1")
+        .env("BY_RS_CONFIG_BOOTSTRAP_JSON", "1")
         .env_remove("BRAINYARD_PROJECT_DIR")
         .args(["config", "--auto", "--profile", "dev", "--dry-run"])
         .assert()
@@ -4133,6 +4170,7 @@ fn config_bootstrap_projection_uses_existing_reachable_config_unless_rebootstrap
         .env("HOME", home.path())
         .env("PATH", path_dir.path())
         .env("BY_NO_DOTENV", "1")
+        .env("BY_RS_CONFIG_BOOTSTRAP_JSON", "1")
         .env_remove("BRAINYARD_PROJECT_DIR")
         .args([
             "config",

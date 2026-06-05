@@ -10985,8 +10985,128 @@ fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()>
         "projected_config_delta": projected_config_delta,
         "note": "by-rs config bootstrap is still read-only: it now projects the Clojure ladder decision, but does not write config.edn or bootstrap-log.edn."
     });
-    println!("{}", serde_json::to_string_pretty(&projection)?);
+    if config_bootstrap_json_projection_requested() {
+        println!("{}", serde_json::to_string_pretty(&projection)?);
+    } else {
+        print_config_bootstrap_human(
+            auto,
+            &profile,
+            existing_config_present,
+            &detection,
+            &choice,
+            dry_run,
+        );
+    }
     Ok(())
+}
+
+fn config_bootstrap_json_projection_requested() -> bool {
+    std::env::var_os("BY_RS_CONFIG_BOOTSTRAP_JSON").is_some()
+}
+
+fn print_config_bootstrap_human(
+    auto: bool,
+    profile: &ConfigBootstrapProfile,
+    existing_config_present: bool,
+    detection: &ConfigBootstrapDetection,
+    choice: &ConfigBootstrapChoice,
+    dry_run: bool,
+) {
+    println!();
+    println!("  Brainyard Environment Bootstrap");
+    println!("  ================================");
+    if auto {
+        println!("  --auto mode ({} profile)", profile.name);
+    }
+    if existing_config_present {
+        println!("(Existing config found — using it unless rung re-evaluation is needed.)");
+    } else {
+        println!("(No existing config found — starting fresh.)");
+    }
+
+    println!();
+    println!("Detecting environment...");
+    println!();
+    println!("Detected providers:");
+    let available_providers = detection
+        .providers
+        .iter()
+        .filter(|provider| provider.available)
+        .collect::<Vec<_>>();
+    if available_providers.is_empty() {
+        println!("  (none)");
+    } else {
+        for provider in available_providers {
+            println!(
+                "  [ok] {} ({}) {}",
+                provider.provider, provider.method, provider.detail
+            );
+        }
+    }
+
+    let missing_env_vars = detection
+        .providers
+        .iter()
+        .filter_map(|provider| {
+            provider
+                .env_var
+                .filter(|_| !provider.available)
+                .map(|env_var| (env_var, provider.provider.as_str()))
+        })
+        .collect::<Vec<_>>();
+    if !missing_env_vars.is_empty() {
+        println!();
+        println!("Set any of these env vars to enable more providers:");
+        for (env_var, provider) in missing_env_vars {
+            println!("  export {env_var}=...   # {provider}");
+        }
+        println!("  (put in ~/.zshenv / ~/.bashrc for persistence, or .env at repo root)");
+    }
+
+    println!();
+    println!(
+        "Bootstrap rung ({}): {}",
+        choice.rung,
+        config_bootstrap_rung_title(choice.rung)
+    );
+    println!("  {}", choice.reason);
+
+    if let (Some(provider), Some(model)) = (&choice.provider, &choice.model) {
+        println!();
+        println!("Smoke-testing {provider}/{model}...");
+        println!("  (skipped by by-rs read-only dry-run projection)");
+    }
+
+    println!();
+    println!("--- Summary ---");
+    println!(
+        "  LLM:         {} / {}",
+        choice.provider.as_deref().unwrap_or("(none)"),
+        choice.model.as_deref().unwrap_or("default")
+    );
+    println!("  Bootstrap:   rung {}", choice.rung);
+    println!("  Sandbox:     standard (none)");
+    println!("  Permissions: ask-each-time, 3 dirs");
+    println!("  Agent:       coact-agent, 100 iters");
+    println!("  MCP:         none");
+
+    if dry_run {
+        println!();
+        println!("--dry-run: not writing config.edn.");
+    }
+}
+
+fn config_bootstrap_rung_title(rung: &str) -> &'static str {
+    match rung {
+        "a" => "Existing config",
+        "b" => "API key",
+        "c" => "Claude CLI",
+        "d" => "Apple Foundation Models",
+        "e" => "Ollama (install/pull)",
+        "f" => "Ollama cloud",
+        "g" => "Stop",
+        _ => "Unknown",
+    }
 }
 
 fn resolve_config_bootstrap_profile(profile: Option<&str>) -> ConfigBootstrapProfile {
