@@ -14676,11 +14676,11 @@ fn memory_sub_llm_mode(
     if !options.dry_run && !options.live {
         return Ok(None);
     }
-    if options.provider != "bedrock" {
+    if !matches!(options.provider.as_str(), "bedrock" | "claude-code") {
         print_query_live_projection_error(
             projection,
             format!(
-                "unsupported live memory sub-LM provider '{}'; by-rs currently supports bedrock",
+                "unsupported live memory sub-LM provider '{}'; by-rs currently supports bedrock and claude-code",
                 options.provider
             ),
         )?;
@@ -14827,16 +14827,38 @@ fn print_memory_llm_consolidate_bedrock(
     Ok(())
 }
 
+struct MemorySubLlmResponse {
+    raw: serde_json::Value,
+    projected: serde_json::Value,
+    text: String,
+    stop_reason: String,
+}
+
 struct MemoryBedrockSubLlmResult {
+    provider: String,
     model: String,
-    runtime: by_llm::BedrockRuntimeOptions,
+    runtime: Option<by_llm::BedrockRuntimeOptions>,
     request: serde_json::Value,
-    response: Option<by_llm::BedrockConverseResponse>,
+    response: Option<MemorySubLlmResponse>,
     parsed: Option<serde_json::Value>,
     parse_error: Option<String>,
 }
 
 fn memory_bedrock_sub_llm(
+    projection: &str,
+    mode: MemorySubLlmMode,
+    system: &str,
+    input: &serde_json::Value,
+    options: &SubLlmRunOptions,
+) -> Result<MemoryBedrockSubLlmResult> {
+    match options.provider.as_str() {
+        "bedrock" => memory_bedrock_provider_sub_llm(projection, mode, system, input, options),
+        "claude-code" => memory_claude_code_provider_sub_llm(mode, system, input, options),
+        other => bail!("unsupported memory sub-LM provider {other}"),
+    }
+}
+
+fn memory_bedrock_provider_sub_llm(
     projection: &str,
     mode: MemorySubLlmMode,
     system: &str,
@@ -14871,8 +14893,9 @@ fn memory_bedrock_sub_llm(
     let request = by_llm::build_bedrock_request(&config, &messages);
     match mode {
         MemorySubLlmMode::DryRun => Ok(MemoryBedrockSubLlmResult {
+            provider: "bedrock".to_string(),
             model,
-            runtime,
+            runtime: Some(runtime),
             request,
             response: None,
             parsed: None,
@@ -14895,10 +14918,73 @@ fn memory_bedrock_sub_llm(
                 Err(error) => (None, Some(error)),
             };
             Ok(MemoryBedrockSubLlmResult {
+                provider: "bedrock".to_string(),
                 model,
-                runtime,
+                runtime: Some(runtime),
                 request,
-                response: Some(response),
+                response: Some(MemorySubLlmResponse {
+                    raw: response.raw,
+                    projected: response.projected,
+                    text: response.text,
+                    stop_reason: response.stop_reason,
+                }),
+                parsed,
+                parse_error,
+            })
+        }
+    }
+}
+
+fn memory_claude_code_provider_sub_llm(
+    mode: MemorySubLlmMode,
+    system: &str,
+    input: &serde_json::Value,
+    options: &SubLlmRunOptions,
+) -> Result<MemoryBedrockSubLlmResult> {
+    let model = options.model.clone().unwrap_or_else(|| "opus".to_string());
+    let config = by_llm::ProviderChatConfig {
+        model: model.clone(),
+        temperature: Some(options.temperature),
+        max_tokens: Some(
+            options
+                .max_tokens
+                .unwrap_or(MEMORY_SUB_LLM_DEFAULT_MAX_TOKENS),
+        ),
+        drop_temperature: false,
+    };
+    let input_text = serde_json::to_string_pretty(input)?;
+    let messages = vec![
+        by_llm::ChatMessage::system(system.to_string()),
+        by_llm::ChatMessage::user(input_text),
+    ];
+    let request = by_llm::build_provider_request("claude-code", &config, &messages)?.request;
+    match mode {
+        MemorySubLlmMode::DryRun => Ok(MemoryBedrockSubLlmResult {
+            provider: "claude-code".to_string(),
+            model,
+            runtime: None,
+            request,
+            response: None,
+            parsed: None,
+            parse_error: None,
+        }),
+        MemorySubLlmMode::Live => {
+            let response = by_llm::invoke_claude_code(&config, &messages)?;
+            let (parsed, parse_error) = match parse_sub_llm_json_response(&response.text) {
+                Ok(value) => (Some(value), None),
+                Err(error) => (None, Some(error)),
+            };
+            Ok(MemoryBedrockSubLlmResult {
+                provider: "claude-code".to_string(),
+                model,
+                runtime: None,
+                request,
+                response: Some(MemorySubLlmResponse {
+                    raw: response.raw,
+                    projected: response.projected,
+                    text: response.text,
+                    stop_reason: response.stop_reason,
+                }),
                 parsed,
                 parse_error,
             })
@@ -14913,8 +14999,8 @@ fn memory_bedrock_report(
     result: &MemoryBedrockSubLlmResult,
 ) -> serde_json::Value {
     let (source, network) = match mode {
-        MemorySubLlmMode::DryRun => ("bedrock-dry-run", false),
-        MemorySubLlmMode::Live => ("bedrock-live", true),
+        MemorySubLlmMode::DryRun => (format!("{}-dry-run", result.provider), false),
+        MemorySubLlmMode::Live => (format!("{}-live", result.provider), true),
     };
     let mut report = serde_json::json!({
         "projection": projection,
@@ -14924,14 +15010,21 @@ fn memory_bedrock_report(
         "current-agent-skipped?": false,
         "input-contract-only?": false,
         "sub-lm-live-skipped?": false,
-        "provider": "bedrock",
+        "provider": result.provider,
         "model": result.model,
-        "region": result.runtime.region,
-        "aws_profile": result.runtime.aws_profile,
         "request": result.request,
         "input": input,
     });
+
     if let serde_json::Value::Object(ref mut object) = report {
+        if let Some(runtime) = result.runtime.as_ref() {
+            object.insert("region".to_string(), serde_json::json!(runtime.region));
+            object.insert(
+                "aws_profile".to_string(),
+                serde_json::json!(runtime.aws_profile),
+            );
+        }
+
         match result.response.as_ref() {
             Some(response) => {
                 object.insert("result".to_string(), serde_json::json!(response.text));
@@ -14943,6 +15036,7 @@ fn memory_bedrock_report(
                 );
             }
             None => {
+                object.insert("response".to_string(), serde_json::Value::Null);
                 object.insert("result".to_string(), serde_json::Value::Null);
             }
         }

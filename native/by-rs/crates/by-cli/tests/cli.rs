@@ -15039,6 +15039,54 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"C
 }
 
 #[test]
+fn memory_essence_extract_claude_code_live_invokes_cli_and_parses_result() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let capture_path = home.path().join("claude-memory-stdin.txt");
+    write_fake_executable(
+        &path_dir.path().join("claude"),
+        r#"#!/usr/bin/env bash
+cat > "$CLAUDE_CAPTURE_STDIN"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"{\"essences\":[\"carry provider parity\"],\"reasoning\":\"parsed\"}","usage":{"input_tokens":7,"output_tokens":8}}'
+"#,
+    );
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .env("PATH", prepend_path(path_dir.path()))
+        .env("CLAUDE_CAPTURE_STDIN", &capture_path)
+        .args([
+            "memory",
+            "essence-extract",
+            "--turn-summary",
+            "summary",
+            "--turn-messages",
+            "user: hi",
+            "--recent-episodes",
+            "[]",
+            "--live",
+            "--provider",
+            "claude-code",
+            "--model",
+            "haiku",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"provider\": \"claude-code\""))
+        .stdout(predicate::str::contains("\"source\": \"claude-code-live\""))
+        .stdout(predicate::str::contains("\"network\": true"))
+        .stdout(predicate::str::contains("carry provider parity"))
+        .stdout(predicate::str::contains("\"reasoning\": \"parsed\""))
+        .stderr(predicate::str::is_empty());
+
+    let captured = std::fs::read_to_string(capture_path).unwrap();
+    assert!(captured.contains("summary"));
+    assert!(captured.contains("user: hi"));
+}
+
+#[test]
 fn ask_dry_run_renders_acp_prompt_request_without_network() {
     Command::cargo_bin("by-rs")
         .unwrap()
