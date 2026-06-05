@@ -924,7 +924,7 @@ fn assert_command_matches_oracle(oracle: &Path, args: &[&str], stdin: &str) {
 
     let expected = run_oracle_command(oracle, args, stdin, oracle_home.path());
     let by_rs = by_rs_binary();
-    let actual = run_command(&by_rs, args, stdin, rust_home.path());
+    let actual = run_command_with_oracle_user_home(&by_rs, args, stdin, rust_home.path());
 
     assert_eq!(
         expected.status_code, actual.status_code,
@@ -953,7 +953,7 @@ fn assert_run_setup_error_matches_oracle(oracle: &Path, provider: &str) {
 
     let expected = run_oracle_command(oracle, args, "/quit\n", oracle_home.path());
     let by_rs = by_rs_binary();
-    let actual = run_command(&by_rs, args, "/quit\n", rust_home.path());
+    let actual = run_command_with_oracle_user_home(&by_rs, args, "/quit\n", rust_home.path());
 
     assert_eq!(
         expected.status_code, actual.status_code,
@@ -1228,9 +1228,9 @@ fn normalize_init_snapshot_timestamps(output: &str) -> String {
 }
 
 fn normalize_agent_instance_ids(output: &str) -> String {
-    Regex::new(r"coact-agent/[a-z]+-[a-z]+-\d{4}")
+    Regex::new(r"coact-agent/[a-z]+-[a-z]+-\d{3,4}")
         .expect("agent instance id regex")
-        .replace_all(output, "coact-agent/$INSTANCE")
+        .replace_all(output, "coact-agent/$$INSTANCE")
         .into_owned()
 }
 

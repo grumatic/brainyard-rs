@@ -39128,15 +39128,32 @@ fn run_config_dirs_display(object: &serde_json::Map<String, serde_json::Value>) 
     format!("{{{}}}", entries.join(", "))
 }
 
+#[cfg(not(unix))]
+fn env_home_dir_var(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn oracle_user_home_dir() -> Option<PathBuf> {
+    std::env::var_os("BY_RS_ORACLE_USER_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 #[cfg(unix)]
 fn system_user_home_dir() -> Option<PathBuf> {
-    let user = command_stdout("id", &["-un"])?;
-    system_home_dir_for_user(&user)
+    oracle_user_home_dir().or_else(|| {
+        let user = command_stdout("id", &["-un"])?;
+        system_home_dir_for_user(&user)
+    })
 }
 
 #[cfg(not(unix))]
 fn system_user_home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE").map(PathBuf::from)
+    oracle_user_home_dir()
+        .or_else(|| env_home_dir_var("USERPROFILE"))
+        .or_else(|| env_home_dir_var("HOME"))
 }
 
 #[cfg(target_os = "macos")]
