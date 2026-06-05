@@ -10994,6 +10994,7 @@ fn print_config_bootstrap_projection(opts: ConfigBootstrapOptions) -> Result<()>
             existing_config_present,
             &detection,
             &choice,
+            &projected_config_delta,
             dry_run,
         );
     }
@@ -11010,6 +11011,7 @@ fn print_config_bootstrap_human(
     existing_config_present: bool,
     detection: &ConfigBootstrapDetection,
     choice: &ConfigBootstrapChoice,
+    projected_config_delta: &serde_json::Value,
     dry_run: bool,
 ) {
     println!();
@@ -11093,6 +11095,7 @@ fn print_config_bootstrap_human(
     if dry_run {
         println!();
         println!("--dry-run: not writing config.edn.");
+        println!("{}", config_bootstrap_delta_as_edn(projected_config_delta));
     }
 }
 
@@ -11107,6 +11110,69 @@ fn config_bootstrap_rung_title(rung: &str) -> &'static str {
         "g" => "Stop",
         _ => "Unknown",
     }
+}
+
+fn config_bootstrap_delta_as_edn(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    write_config_edn_value(None, value, &mut out);
+    out
+}
+
+fn write_config_edn_value(key: Option<&str>, value: &serde_json::Value, out: &mut String) {
+    match value {
+        serde_json::Value::Null => out.push_str("nil"),
+        serde_json::Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
+        serde_json::Value::Number(value) => out.push_str(&value.to_string()),
+        serde_json::Value::String(value) => {
+            if config_edn_keyword_value(key, value) {
+                out.push_str(&format!(":{}", config_edn_symbol(value)));
+            } else {
+                out.push_str(
+                    &serde_json::to_string(value)
+                        .unwrap_or_else(|_| "\"<unprintable>\"".to_string()),
+                );
+            }
+        }
+        serde_json::Value::Array(values) => {
+            out.push('[');
+            for (index, item) in values.iter().enumerate() {
+                if index > 0 {
+                    out.push(' ');
+                }
+                write_config_edn_value(None, item, out);
+            }
+            out.push(']');
+        }
+        serde_json::Value::Object(map) => {
+            out.push('{');
+            for (index, (entry_key, entry_value)) in map.iter().enumerate() {
+                if index > 0 {
+                    out.push(' ');
+                }
+                out.push_str(&config_edn_key(entry_key));
+                out.push(' ');
+                write_config_edn_value(Some(entry_key), entry_value, out);
+            }
+            out.push('}');
+        }
+    }
+}
+
+fn config_edn_key(key: &str) -> String {
+    format!(":{}", config_edn_symbol(key))
+}
+
+fn config_edn_symbol(value: &str) -> String {
+    value.trim_start_matches(':').replace('_', "-")
+}
+
+fn config_edn_keyword_value(key: Option<&str>, value: &str) -> bool {
+    matches!(
+        key,
+        Some("default_provider" | "provider" | "rung" | "selected_provider")
+    ) && value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
 }
 
 fn resolve_config_bootstrap_profile(profile: Option<&str>) -> ConfigBootstrapProfile {

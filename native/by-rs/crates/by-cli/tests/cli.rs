@@ -3989,6 +3989,32 @@ fn config_bootstrap_dry_run_prints_clojure_style_human_summary_by_default() {
 }
 
 #[test]
+fn config_bootstrap_dry_run_prints_projected_config_edn_like_clojure() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let mut cmd = Command::cargo_bin("by-rs").unwrap();
+    scrub_config_bootstrap_provider_env(&mut cmd);
+
+    cmd.env("HOME", home.path())
+        .env("PATH", path_dir.path())
+        .env("BY_NO_DOTENV", "1")
+        .args(["config", "--auto", "--profile", "dev", "--dry-run"])
+        .assert()
+        .success()
+        .stderr(predicate::str::is_empty())
+        .stdout(predicate::str::contains(
+            "--dry-run: not writing config.edn.",
+        ))
+        .stdout(predicate::str::contains("{:bootstrap"))
+        .stdout(predicate::str::contains(":rung :g"))
+        .stdout(predicate::str::contains(":incomplete true"))
+        .stdout(predicate::str::contains(":next-steps"))
+        .stdout(predicate::str::contains("\"projected_config_delta\"").not());
+
+    assert!(!home.path().join(".brainyard").exists());
+}
+
+#[test]
 fn config_bootstrap_projection_stays_read_only() {
     let home = tempfile::tempdir().unwrap();
     let path_dir = tempfile::tempdir().unwrap();
