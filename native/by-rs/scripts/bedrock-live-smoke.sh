@@ -169,6 +169,11 @@ else
   mkdir -p "$smoke_home"
 fi
 
+# bedrock-live-smoke is an internal parity/smoke harness. It intentionally
+# opts into by-rs ask projection-only flags such as --max-tokens, --region,
+# --aws-profile, and --dry-run, which are hidden from the production CLI.
+export BY_RS_ALLOW_ASK_TEST_OPTIONS=1
+
 args=("ask" "-p" "bedrock" "-m" "$model" "--max-tokens" "$max_tokens" "--no-prompt-cache")
 if [[ -n "$region" ]]; then
   args+=("--region" "$region")
@@ -177,7 +182,7 @@ if [[ -n "$profile" ]]; then
   args+=("--aws-profile" "$profile")
 fi
 case "$mode" in
-  live) args+=("--live") ;;
+  live) ;;
   dry-run) args+=("--dry-run") ;;
   *) echo "Unknown smoke mode: $mode" >&2; exit 2 ;;
 esac

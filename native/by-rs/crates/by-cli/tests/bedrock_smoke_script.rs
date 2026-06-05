@@ -44,3 +44,95 @@ fn bedrock_live_smoke_script_is_valid_bash() {
 
     assert!(status.success());
 }
+
+#[test]
+fn bedrock_live_smoke_script_opts_into_ask_test_projection_options() {
+    let script = native_root().join("scripts/bedrock-live-smoke.sh");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fake_bin = temp.path().join("by-rs");
+    std::fs::write(
+        &fake_bin,
+        r#"#!/usr/bin/env bash
+printf 'ALLOW=%s\n' "${BY_RS_ALLOW_ASK_TEST_OPTIONS:-}"
+printf 'ARGS=%s\n' "$*"
+"#,
+    )
+    .expect("write fake by-rs");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&fake_bin)
+            .expect("fake metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_bin, permissions).expect("chmod fake by-rs");
+    }
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("--dry-run")
+        .arg("--bin")
+        .arg(&fake_bin)
+        .env("BY_NO_DOTENV", "1")
+        .output()
+        .expect("smoke script should run with fake binary");
+
+    assert!(
+        output.status.success(),
+        "script failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ALLOW=1"), "{stdout}");
+    assert!(stdout.contains("ARGS=ask"), "{stdout}");
+    assert!(stdout.contains("--dry-run"), "{stdout}");
+    assert!(stdout.contains("--max-tokens"), "{stdout}");
+}
+
+#[test]
+fn bedrock_live_smoke_script_does_not_pass_removed_ask_live_flag() {
+    let script = native_root().join("scripts/bedrock-live-smoke.sh");
+    let temp = tempfile::tempdir().expect("tempdir");
+    let fake_bin = temp.path().join("by-rs");
+    std::fs::write(
+        &fake_bin,
+        r#"#!/usr/bin/env bash
+printf 'ARGS=%s\n' "$*"
+"#,
+    )
+    .expect("write fake by-rs");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&fake_bin)
+            .expect("fake metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&fake_bin, permissions).expect("chmod fake by-rs");
+    }
+
+    let output = Command::new("bash")
+        .arg(&script)
+        .arg("--live")
+        .arg("--bin")
+        .arg(&fake_bin)
+        .env("BY_NO_DOTENV", "1")
+        .output()
+        .expect("smoke script should run with fake binary");
+
+    assert!(
+        output.status.success(),
+        "script failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let args_line = stdout
+        .lines()
+        .find(|line| line.starts_with("ARGS="))
+        .expect("fake binary should print args");
+    assert!(!args_line.contains("--live"), "{stdout}");
+}
