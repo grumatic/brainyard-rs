@@ -8571,9 +8571,14 @@ fn print_run_one_turn(args: RunOneTurnRequest) -> Result<()> {
         })
         .context("--model is required for run one-turn mode")?;
 
-    if args.live && !matches!(resolved_provider.as_str(), "bedrock" | "claude-code") {
+    if args.live
+        && !matches!(
+            resolved_provider.as_str(),
+            "bedrock" | "claude-code" | "ollama"
+        )
+    {
         bail!(
-            "by-rs run live one-turn currently supports providers 'bedrock' and 'claude-code' only"
+            "by-rs run live one-turn currently supports providers 'bedrock', 'claude-code', and 'ollama' only"
         );
     }
 
@@ -8674,6 +8679,39 @@ fn print_run_one_turn(args: RunOneTurnRequest) -> Result<()> {
         return Ok(());
     }
 
+    if args.live && resolved_provider == "ollama" {
+        let config = by_llm::ProviderChatConfig {
+            model: model.clone(),
+            temperature: None,
+            max_tokens: args.max_tokens,
+            drop_temperature: false,
+        };
+        let response = by_llm::invoke_openai_compatible_http(
+            "ollama",
+            &resolve_ollama_base_url(),
+            &config,
+            &messages,
+        )?;
+        let by_llm::OpenAiCompatibleHttpResponse {
+            projected, text, ..
+        } = response;
+        let assistant_content = if text.is_empty() {
+            serde_json::to_string_pretty(&projected)?
+        } else {
+            text
+        };
+        persist_run_result(
+            &session_id,
+            &resolved_agent,
+            &model,
+            &question,
+            &assistant_content,
+            &projected,
+        )?;
+        println!("{assistant_content}");
+        return Ok(());
+    }
+
     if args.live && resolved_provider == "claude-code" {
         let config = by_llm::ProviderChatConfig {
             model: model.clone(),
@@ -8744,6 +8782,13 @@ fn print_run_one_turn(args: RunOneTurnRequest) -> Result<()> {
     )?;
     println!("{assistant_content}");
     Ok(())
+}
+
+fn resolve_ollama_base_url() -> String {
+    std::env::var("BY_RS_OLLAMA_BASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "http://localhost:11434/v1".to_string())
 }
 
 fn validate_run_one_turn_modes(

@@ -3,6 +3,8 @@ use by_persist::list_sessions;
 use predicates::prelude::*;
 use rusqlite::Connection;
 use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::thread;
@@ -134,6 +136,63 @@ fn read_session_messages(home: &Path, session_id: &str) -> String {
             .join("messages.log"),
     )
     .unwrap()
+}
+
+fn spawn_openai_compatible_fixture(response_text: &str) -> (String, thread::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let response_text = response_text.to_string();
+    let handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let header_end = loop {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                panic!("openai-compatible fixture connection closed before headers");
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break header_end;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().unwrap())
+            })
+            .unwrap_or(0);
+        let body_start = header_end + 4;
+        while request.len() < body_start + content_length {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+        }
+        let request_body =
+            String::from_utf8_lossy(&request[body_start..body_start + content_length]).to_string();
+        let response_body = serde_json::json!({
+            "choices": [{
+                "message": {"role": "assistant", "content": response_text},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}
+        })
+        .to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            response_body.len(),
+            response_body
+        )
+        .unwrap();
+        request_body
+    });
+    (base_url, handle)
 }
 
 fn scrub_config_bootstrap_provider_env(cmd: &mut Command) {
@@ -523,24 +582,34 @@ fn run_with_closed_stdin_stays_alive_like_tui() {
 }
 
 #[test]
-fn run_loop_processes_input_before_quit_command() {
+fn run_loop_invokes_ollama_live_and_persists_messages() {
     let home = tempfile::tempdir().unwrap();
+    let (ollama_base_url, request_handle) =
+        spawn_openai_compatible_fixture("Ollama fixture answer");
 
     Command::cargo_bin("by-rs")
         .unwrap()
         .env("HOME", home.path())
-        .env("BRAINYARD_SESSION_ID", "agt-run-loop-input")
+        .env("BRAINYARD_SESSION_ID", "agt-run-loop-ollama")
         .env("BY_NO_DOTENV", "1")
-        .args(["run", "-p", "ollama"])
-        .write_stdin("hello\n/quit\n")
+        .env("BY_RS_OLLAMA_BASE_URL", &ollama_base_url)
+        .args(["run", "--inline", "-p", "ollama"])
+        .write_stdin("Hello Ollama\n/quit\n")
         .assert()
         .success()
         .stdout(predicate::str::contains("Brainyard TUI"))
         .stdout(predicate::str::contains("ollama/glm-5:cloud"))
+        .stdout(predicate::str::contains("Ollama fixture answer"))
         .stdout(predicate::str::contains("TUI session ended."))
-        .stderr(predicate::str::contains(
-            "currently supports providers 'bedrock' and 'claude-code' only",
-        ));
+        .stderr(predicate::str::is_empty());
+
+    let request_body = request_handle.join().unwrap();
+    assert!(request_body.contains(r#""model":"glm-5:cloud""#));
+    assert!(request_body.contains("Hello Ollama"));
+
+    let messages = read_session_messages(home.path(), "agt-run-loop-ollama");
+    assert!(messages.contains("Hello Ollama"));
+    assert!(messages.contains("Ollama fixture answer"));
 }
 
 #[test]
@@ -1783,7 +1852,7 @@ fn run_one_turn_mode_rejects_non_bedrock_before_network() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "by-rs run live one-turn currently supports providers 'bedrock' and 'claude-code' only",
+            "by-rs run live one-turn currently supports providers 'bedrock', 'claude-code', and 'ollama' only",
         ));
 
     assert!(!home

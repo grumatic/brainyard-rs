@@ -13,7 +13,8 @@ use aws_sdk_bedrockruntime::{
 use aws_types::region::Region;
 use serde_json::{json, Map, Value};
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -63,6 +64,13 @@ pub struct BedrockConverseResponse {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClaudeCodeResponse {
+    pub raw: Value,
+    pub projected: Value,
+    pub text: String,
+    pub stop_reason: String,
+}
+
+pub struct OpenAiCompatibleHttpResponse {
     pub raw: Value,
     pub projected: Value,
     pub text: String,
@@ -254,6 +262,147 @@ pub fn build_provider_request(
             request: build_acp_request(config, messages),
         }),
         other => bail!("dry-run request shaping does not support provider '{other}'"),
+    }
+}
+
+pub fn invoke_openai_compatible_http(
+    provider: &str,
+    base_url: &str,
+    config: &ProviderChatConfig,
+    messages: &[ChatMessage],
+) -> Result<OpenAiCompatibleHttpResponse> {
+    let endpoint = parse_http_chat_completions_endpoint(base_url)?;
+    let request = build_openai_compatible_request(config, messages);
+    let request_body = serde_json::to_string(&request)?;
+    let mut stream =
+        TcpStream::connect((endpoint.host.as_str(), endpoint.port)).with_context(|| {
+            format!(
+                "failed to connect to {} provider at {}:{}",
+                provider, endpoint.host, endpoint.port
+            )
+        })?;
+    let host_header = if endpoint.port == 80 {
+        endpoint.host.clone()
+    } else {
+        format!("{}:{}", endpoint.host, endpoint.port)
+    };
+    write!(
+        stream,
+        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nAccept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        endpoint.path,
+        host_header,
+        request_body.len(),
+        request_body
+    )?;
+    stream.flush()?;
+
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response)?;
+    let raw = parse_http_json_response(provider, &response)?;
+    let projected = reshape_provider_response(provider, raw.clone())?;
+    let text = projected_response_text(&projected);
+    let stop_reason = projected
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    Ok(OpenAiCompatibleHttpResponse {
+        raw,
+        projected,
+        text,
+        stop_reason,
+    })
+}
+
+struct HttpChatCompletionsEndpoint {
+    host: String,
+    port: u16,
+    path: String,
+}
+
+fn parse_http_chat_completions_endpoint(base_url: &str) -> Result<HttpChatCompletionsEndpoint> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    let without_scheme = trimmed
+        .strip_prefix("http://")
+        .context("openai-compatible live calls currently require an http:// base URL")?;
+    let (authority, base_path) = without_scheme
+        .split_once('/')
+        .map(|(authority, path)| (authority, format!("/{path}")))
+        .unwrap_or((without_scheme, String::new()));
+    if authority.is_empty() || authority.contains('@') {
+        bail!("invalid openai-compatible provider base URL");
+    }
+    let (host, port) = match authority.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() => {
+            let port = port
+                .parse::<u16>()
+                .context("invalid openai-compatible provider base URL port")?;
+            (host.to_string(), port)
+        }
+        _ => (authority.to_string(), 80),
+    };
+    let path = if base_path.is_empty() {
+        "/chat/completions".to_string()
+    } else {
+        format!("{}/chat/completions", base_path.trim_end_matches('/'))
+    };
+    Ok(HttpChatCompletionsEndpoint { host, port, path })
+}
+
+fn parse_http_json_response(provider: &str, response: &[u8]) -> Result<Value> {
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .context("provider HTTP response did not include a header terminator")?;
+    let headers = String::from_utf8_lossy(&response[..header_end]);
+    let status_line = headers
+        .lines()
+        .next()
+        .context("provider HTTP response did not include a status line")?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|value| value.parse::<u16>().ok())
+        .context("provider HTTP response status code was not parseable")?;
+    let body = &response[header_end + 4..];
+    let body = if headers
+        .lines()
+        .any(|line| line.eq_ignore_ascii_case("transfer-encoding: chunked"))
+    {
+        decode_chunked_body(body)?
+    } else {
+        body.to_vec()
+    };
+    if !(200..300).contains(&status) {
+        let body = String::from_utf8_lossy(&body);
+        bail!("{provider} provider returned HTTP {status}: {body}");
+    }
+    serde_json::from_slice(&body).context("failed to parse provider JSON response")
+}
+
+fn decode_chunked_body(body: &[u8]) -> Result<Vec<u8>> {
+    let mut decoded = Vec::new();
+    let mut offset = 0;
+    loop {
+        let line_end = body[offset..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .map(|position| offset + position)
+            .context("chunked response ended before chunk size")?;
+        let size_line = String::from_utf8_lossy(&body[offset..line_end]);
+        let size_text = size_line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_text, 16).context("invalid chunk size")?;
+        offset = line_end + 2;
+        if size == 0 {
+            return Ok(decoded);
+        }
+        let end = offset + size;
+        if body.len() < end + 2 {
+            bail!("chunked response ended before declared chunk payload");
+        }
+        decoded.extend_from_slice(&body[offset..end]);
+        offset = end + 2;
     }
 }
 
