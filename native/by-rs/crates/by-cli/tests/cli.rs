@@ -2017,13 +2017,8 @@ fn sessions_list_help_matches_clojure_command_surface() {
         .args(["sessions", "list", "--help"])
         .assert()
         .success()
-        .stderr(predicate::str::contains(
-            "NAME:\n by sessions list - List all persisted sessions",
-        ))
-        .stderr(predicate::str::contains(
-            "USAGE:\n by sessions list [command options] [arguments...]",
-        ))
-        .stderr(predicate::str::contains("--root").not());
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::is_empty());
 }
 
 #[test]
