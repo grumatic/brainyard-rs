@@ -2,6 +2,7 @@ use assert_cmd::Command as AssertCommand;
 use by_persist::list_sessions;
 use predicates::prelude::*;
 use rusqlite::Connection;
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
 use std::thread;
@@ -81,6 +82,26 @@ fn link_fake_executable(path: &Path, target: &str) {
 
     #[cfg(not(unix))]
     std::fs::copy(target, path).unwrap();
+}
+
+fn write_fake_executable(path: &Path, body: &str) {
+    std::fs::write(path, body).unwrap();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+}
+
+fn prepend_path(path: &Path) -> OsString {
+    let mut paths = vec![path.to_path_buf()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(paths).unwrap()
 }
 
 fn system_binary(candidates: &[&'static str]) -> &'static str {
@@ -518,8 +539,48 @@ fn run_loop_processes_input_before_quit_command() {
         .stdout(predicate::str::contains("ollama/glm-5:cloud"))
         .stdout(predicate::str::contains("TUI session ended."))
         .stderr(predicate::str::contains(
-            "currently supports provider 'bedrock' only",
+            "currently supports providers 'bedrock' and 'claude-code' only",
         ));
+}
+
+#[test]
+fn run_loop_invokes_claude_code_live_and_persists_messages() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let capture_path = home.path().join("claude-stdin.txt");
+    write_fake_executable(
+        &path_dir.path().join("claude"),
+        r#"#!/usr/bin/env bash
+cat > "$CLAUDE_CAPTURE_STDIN"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Claude fixture answer","usage":{"input_tokens":3,"output_tokens":4}}'
+"#,
+    );
+
+    let assert = Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-claude-code")
+        .env("BY_NO_DOTENV", "1")
+        .env("PATH", prepend_path(path_dir.path()))
+        .env("CLAUDE_CAPTURE_STDIN", &capture_path)
+        .args(["run", "--inline", "-p", "claude-code", "-m", "haiku"])
+        .write_stdin("Hello Claude\n/quit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Claude fixture answer"))
+        .stdout(predicate::str::contains("TUI session ended."))
+        .stderr(predicate::str::is_empty());
+    let _ = assert;
+
+    assert_eq!(
+        std::fs::read_to_string(capture_path).unwrap(),
+        "Hello Claude"
+    );
+    let messages = read_session_messages(home.path(), "agt-run-claude-code");
+    assert!(messages.contains(r#":role "user""#));
+    assert!(messages.contains(r#":content "Hello Claude""#));
+    assert!(messages.contains(r#":role "assistant""#));
+    assert!(messages.contains(r#":content "Claude fixture answer""#));
 }
 
 #[test]
@@ -1641,7 +1702,7 @@ fn run_one_turn_mode_rejects_non_bedrock_before_network() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "by-rs run live one-turn currently supports provider 'bedrock' only",
+            "by-rs run live one-turn currently supports providers 'bedrock' and 'claude-code' only",
         ));
 
     assert!(!home
@@ -14865,6 +14926,40 @@ fn ask_dry_run_renders_claude_code_subprocess_request_without_network() {
         .stdout(predicate::str::contains("\"argv\""))
         .stdout(predicate::str::contains("\"--strict-mcp-config\""))
         .stdout(predicate::str::contains("\"stdin\": \"What is 2+2?\""));
+}
+
+#[test]
+fn ask_claude_code_live_invokes_cli_and_prints_result() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let capture_path = home.path().join("claude-ask-stdin.txt");
+    write_fake_executable(
+        &path_dir.path().join("claude"),
+        r#"#!/usr/bin/env bash
+cat > "$CLAUDE_CAPTURE_STDIN"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Claude ask fixture answer","usage":{"input_tokens":5,"output_tokens":6}}'
+"#,
+    );
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .env("PATH", prepend_path(path_dir.path()))
+        .env("CLAUDE_CAPTURE_STDIN", &capture_path)
+        .args(["ask", "-p", "claude-code", "-m", "haiku", "Hello Claude"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "LM configured: claude-code / haiku",
+        ))
+        .stdout(predicate::str::contains("Claude ask fixture answer"))
+        .stderr(predicate::str::is_empty());
+
+    assert_eq!(
+        std::fs::read_to_string(capture_path).unwrap(),
+        "Hello Claude"
+    );
 }
 
 #[test]

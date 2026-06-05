@@ -8571,8 +8571,10 @@ fn print_run_one_turn(args: RunOneTurnRequest) -> Result<()> {
         })
         .context("--model is required for run one-turn mode")?;
 
-    if args.live && resolved_provider != "bedrock" {
-        bail!("by-rs run live one-turn currently supports provider 'bedrock' only");
+    if args.live && !matches!(resolved_provider.as_str(), "bedrock" | "claude-code") {
+        bail!(
+            "by-rs run live one-turn currently supports providers 'bedrock' and 'claude-code' only"
+        );
     }
 
     let messages = run_one_turn_messages(&args.session_selection, &question)?;
@@ -8669,6 +8671,33 @@ fn print_run_one_turn(args: RunOneTurnRequest) -> Result<()> {
             "request": request,
         });
         println!("{}", serde_json::to_string_pretty(&dry_run)?);
+        return Ok(());
+    }
+
+    if args.live && resolved_provider == "claude-code" {
+        let config = by_llm::ProviderChatConfig {
+            model: model.clone(),
+            temperature: Some(0.0),
+            max_tokens: args.max_tokens,
+            drop_temperature: false,
+        };
+        let by_llm::ClaudeCodeResponse {
+            projected, text, ..
+        } = by_llm::invoke_claude_code(&config, &messages)?;
+        let assistant_content = if text.is_empty() {
+            serde_json::to_string_pretty(&projected)?
+        } else {
+            text
+        };
+        persist_run_result(
+            &session_id,
+            &resolved_agent,
+            &model,
+            &question,
+            &assistant_content,
+            &projected,
+        )?;
+        println!("{assistant_content}");
         return Ok(());
     }
 
@@ -9313,8 +9342,30 @@ fn print_ask(args: AskRequest) -> Result<()> {
         return Ok(());
     }
 
-    if resolved_provider != "bedrock" {
-        bail!("by-rs ask currently supports provider 'bedrock' only");
+    if !matches!(resolved_provider.as_str(), "bedrock" | "claude-code") {
+        bail!("by-rs ask currently supports providers 'bedrock' and 'claude-code' only");
+    }
+
+    if resolved_provider == "claude-code" {
+        let config = by_llm::ProviderChatConfig {
+            model: model.clone(),
+            temperature: Some(args.temperature),
+            max_tokens: args.max_tokens,
+            drop_temperature: false,
+        };
+        println!(
+            "\x1b[2mLM configured: {} / {}\x1b[0m",
+            resolved_provider, model
+        );
+        let by_llm::ClaudeCodeResponse {
+            projected, text, ..
+        } = by_llm::invoke_claude_code(&config, &messages)?;
+        if text.is_empty() {
+            println!("{}", serde_json::to_string_pretty(&projected)?);
+        } else {
+            println!("{text}");
+        }
+        return Ok(());
     }
 
     let catalog_region = bedrock_catalog_region(&model)?;

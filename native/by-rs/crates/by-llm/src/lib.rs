@@ -12,6 +12,8 @@ use aws_sdk_bedrockruntime::{
 };
 use aws_types::region::Region;
 use serde_json::{json, Map, Value};
+use std::io::Write;
+use std::process::{Command, ExitStatus, Stdio};
 
 const DEFAULT_BEDROCK_REGION: &str = "us-east-1";
 const MAX_SYSTEM_CACHE_POINTS: usize = 3;
@@ -49,6 +51,14 @@ pub struct BedrockConverseRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BedrockConverseResponse {
+    pub raw: Value,
+    pub projected: Value,
+    pub text: String,
+    pub stop_reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClaudeCodeResponse {
     pub raw: Value,
     pub projected: Value,
     pub text: String,
@@ -296,6 +306,86 @@ pub fn resolve_bedrock_runtime_options(inputs: BedrockRuntimeInputs) -> BedrockR
 
 pub fn default_bedrock_region() -> &'static str {
     DEFAULT_BEDROCK_REGION
+}
+
+pub fn invoke_claude_code(
+    config: &ProviderChatConfig,
+    messages: &[ChatMessage],
+) -> Result<ClaudeCodeResponse> {
+    let request = build_claude_code_request(config, messages);
+    let argv = request
+        .get("argv")
+        .and_then(Value::as_array)
+        .context("claude-code request missing argv")?
+        .iter()
+        .map(|arg| {
+            arg.as_str()
+                .map(str::to_string)
+                .context("claude-code argv items must be strings")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (program, args) = argv
+        .split_first()
+        .context("claude-code request argv must not be empty")?;
+    let stdin_text = request.get("stdin").and_then(Value::as_str).unwrap_or("");
+
+    let mut child = Command::new(program)
+        .args(args)
+        .env_remove("CLAUDECODE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to launch Claude Code CLI `{program}`"))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(stdin_text.as_bytes())
+            .context("failed to write prompt to Claude Code CLI")?;
+    } else {
+        bail!("failed to open Claude Code CLI stdin");
+    }
+
+    let output = child
+        .wait_with_output()
+        .context("failed to wait for Claude Code CLI")?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let raw = Value::String(stdout.clone());
+    let projected = reshape_claude_code_response(raw.clone());
+    let text = projected_response_text(&projected);
+
+    if !output.status.success() && text.trim().is_empty() {
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        bail!(
+            "Claude Code CLI exited with {}: {}",
+            exit_status_display(output.status),
+            detail
+        );
+    }
+
+    let stop_reason = projected
+        .get("stop_reason")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    Ok(ClaudeCodeResponse {
+        raw,
+        projected,
+        text,
+        stop_reason,
+    })
+}
+
+fn exit_status_display(status: ExitStatus) -> String {
+    match status.code() {
+        Some(code) => format!("code {code}"),
+        None => "signal termination".to_string(),
+    }
 }
 
 pub async fn converse_bedrock(request: BedrockConverseRequest) -> Result<BedrockConverseResponse> {
