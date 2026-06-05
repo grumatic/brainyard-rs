@@ -69,6 +69,9 @@ out_dir="$(abs_path "$out_dir")"
 if [[ -n "$fixture_home" ]]; then
   fixture_home="$(abs_path "$fixture_home")"
 fi
+if [[ -n "$bin_path" ]]; then
+  bin_path="$(abs_path "$bin_path")"
+fi
 
 if [[ -n "$bin_path" && -n "$runner_command" ]]; then
   echo "--bin and --runner are mutually exclusive" >&2
