@@ -5279,6 +5279,7 @@ fn run() -> Result<()> {
     }
 
     exit_compat_disabled_ask_test_option_if_requested(&raw_args);
+    exit_compat_cli_parse_error_if_requested(user_args);
     let cli = Cli::parse_from(normalize_default_run_args(raw_args));
     match cli.command {
         Commands::Run {
@@ -7878,6 +7879,366 @@ fn first_disabled_ask_test_option(args: &[String]) -> Option<&'static str> {
         }
     }
     None
+}
+
+fn exit_compat_cli_parse_error_if_requested(args: &[String]) {
+    if args.is_empty() {
+        return;
+    }
+
+    if matches!(args, [command, subcommand] if command == "sessions" && subcommand == "prune") {
+        exit_compat_sessions_prune_missing_arg();
+    }
+
+    if let Some((error, help)) = compat_cli_parse_error(args) {
+        eprint!("** ERROR: **\n{error}\n\n\n{help}");
+        std::process::exit(255);
+    }
+}
+
+fn compat_cli_parse_error(args: &[String]) -> Option<(String, String)> {
+    match args {
+        [flag, ..] if is_option_like(flag) => compat_first_unknown_option(
+            args,
+            compat_top_level_options(),
+            compat_top_level_options_with_values(),
+        )
+        .map(|option| {
+            (
+                format!("Option error: Unknown option: \"{option}\""),
+                run_help().to_string(),
+            )
+        }),
+        [command, rest @ ..] if command == "run" => compat_first_unknown_option(
+            rest,
+            compat_run_options(),
+            compat_run_options_with_values(),
+        )
+        .map(|option| {
+            (
+                format!("Option error: Unknown option: \"{option}\""),
+                run_help().to_string(),
+            )
+        }),
+        [command, rest @ ..] if command == "ask" => compat_first_unknown_option(
+            rest,
+            compat_ask_options(),
+            compat_ask_options_with_values(),
+        )
+        .map(|option| {
+            (
+                format!("Option error: Unknown option: \"{option}\""),
+                ask_help().to_string(),
+            )
+        }),
+        [command, rest @ ..] if command == "models" => compat_first_unknown_option(
+            rest,
+            compat_models_options(),
+            compat_models_options_with_values(),
+        )
+        .map(|option| {
+            (
+                format!("Option error: Unknown option: \"{option}\""),
+                models_help().to_string(),
+            )
+        }),
+        [command, subcommand, ..]
+            if command == "sessions"
+                && !matches!(subcommand.as_str(), "list" | "prune" | "inspect" | "audit") =>
+        {
+            Some((
+                format!("Unknown sub-command: 'by sessions {subcommand}'."),
+                sessions_help(),
+            ))
+        }
+        [command, subcommand, rest @ ..] if command == "sessions" && subcommand == "list" => {
+            compat_first_unknown_option(
+                rest,
+                compat_sessions_list_options(),
+                compat_sessions_list_options_with_values(),
+            )
+            .map(|option| {
+                (
+                    format!("Option error: Unknown option: \"{option}\""),
+                    sessions_list_help().to_string(),
+                )
+            })
+        }
+        [command, subcommand, rest @ ..] if command == "sessions" && subcommand == "prune" => {
+            compat_first_unknown_option(
+                rest,
+                compat_sessions_prune_options(),
+                compat_sessions_prune_options_with_values(),
+            )
+            .map(|option| {
+                (
+                    format!("Option error: Unknown option: \"{option}\""),
+                    sessions_prune_help().to_string(),
+                )
+            })
+        }
+        _ => None,
+    }
+}
+
+fn compat_first_unknown_option(
+    args: &[String],
+    known_options: &[&str],
+    options_with_values: &[&str],
+) -> Option<String> {
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "--" {
+            break;
+        }
+        if !is_option_like(arg) {
+            continue;
+        }
+
+        let option = compat_option_name(arg);
+        if !known_options.contains(&option.as_str()) {
+            return Some(option);
+        }
+        if options_with_values.contains(&option.as_str()) && !arg.contains('=') {
+            let _ = iter.next();
+        }
+    }
+    None
+}
+
+fn compat_option_name(arg: &str) -> String {
+    arg.split_once('=')
+        .map(|(option, _)| option)
+        .unwrap_or(arg)
+        .to_string()
+}
+
+fn is_option_like(arg: &str) -> bool {
+    arg.starts_with('-') && arg != "-"
+}
+
+fn compat_top_level_options() -> &'static [&'static str] {
+    &[
+        "-a",
+        "--agent",
+        "-p",
+        "--provider",
+        "-m",
+        "--model",
+        "-u",
+        "--user-id",
+        "-i",
+        "--inline",
+        "--no-inline",
+        "-v",
+        "--verbose",
+        "--no-verbose",
+        "--with-tmux",
+        "--no-with-tmux",
+        "-n",
+        "--max-iterations",
+        "-r",
+        "--resume",
+        "--select-resume",
+        "--no-select-resume",
+        "--new",
+        "--no-new",
+        "--region",
+        "--aws-profile",
+        "--max-tokens",
+        "--no-prompt-cache",
+        "--dry-run",
+        "--live",
+        "--fixture-response",
+        "--version",
+        "-V",
+    ]
+}
+
+fn compat_top_level_options_with_values() -> &'static [&'static str] {
+    &[
+        "-a",
+        "--agent",
+        "-p",
+        "--provider",
+        "-m",
+        "--model",
+        "-u",
+        "--user-id",
+        "-n",
+        "--max-iterations",
+        "-r",
+        "--resume",
+        "--region",
+        "--aws-profile",
+        "--max-tokens",
+        "--fixture-response",
+    ]
+}
+
+fn compat_run_options() -> &'static [&'static str] {
+    &[
+        "-a",
+        "--agent",
+        "-p",
+        "--provider",
+        "-m",
+        "--model",
+        "-u",
+        "--user-id",
+        "-i",
+        "--inline",
+        "--no-inline",
+        "-v",
+        "--verbose",
+        "--no-verbose",
+        "--with-tmux",
+        "--no-with-tmux",
+        "-n",
+        "--max-iterations",
+        "-r",
+        "--resume",
+        "--select-resume",
+        "--no-select-resume",
+        "--new",
+        "--no-new",
+        "--region",
+        "--aws-profile",
+        "--max-tokens",
+        "--no-prompt-cache",
+        "--dry-run",
+        "--live",
+        "--fixture-response",
+    ]
+}
+
+fn compat_run_options_with_values() -> &'static [&'static str] {
+    &[
+        "-a",
+        "--agent",
+        "-p",
+        "--provider",
+        "-m",
+        "--model",
+        "-u",
+        "--user-id",
+        "-n",
+        "--max-iterations",
+        "-r",
+        "--resume",
+        "--region",
+        "--aws-profile",
+        "--max-tokens",
+        "--fixture-response",
+    ]
+}
+
+fn compat_ask_options() -> &'static [&'static str] {
+    &[
+        "-a",
+        "--agent",
+        "-p",
+        "--provider",
+        "-m",
+        "--model",
+        "-u",
+        "--user-id",
+        "-n",
+        "--max-iterations",
+        "--region",
+        "--aws-profile",
+        "--max-tokens",
+        "--temperature",
+        "--no-prompt-cache",
+        "--dry-run",
+        "--live",
+        "--fixture-response",
+    ]
+}
+
+fn compat_ask_options_with_values() -> &'static [&'static str] {
+    &[
+        "-a",
+        "--agent",
+        "-p",
+        "--provider",
+        "-m",
+        "--model",
+        "-u",
+        "--user-id",
+        "-n",
+        "--max-iterations",
+        "--region",
+        "--aws-profile",
+        "--max-tokens",
+        "--temperature",
+        "--fixture-response",
+    ]
+}
+
+fn compat_models_options() -> &'static [&'static str] {
+    &["-p", "--provider", "--fixture"]
+}
+
+fn compat_models_options_with_values() -> &'static [&'static str] {
+    &["-p", "--provider", "--fixture"]
+}
+
+fn compat_sessions_list_options() -> &'static [&'static str] {
+    &["--root"]
+}
+
+fn compat_sessions_list_options_with_values() -> &'static [&'static str] {
+    &["--root"]
+}
+
+fn compat_sessions_prune_options() -> &'static [&'static str] {
+    &["-s", "--session-id", "--root"]
+}
+
+fn compat_sessions_prune_options_with_values() -> &'static [&'static str] {
+    &["-s", "--session-id", "--root"]
+}
+
+fn exit_compat_sessions_prune_missing_arg() -> ! {
+    eprintln!("** ERROR: **");
+    eprintln!("Exception: #error {{");
+    eprintln!(" :cause Usage: by sessions prune <session-id>");
+    eprintln!(" :data {{}}");
+    eprintln!(" :via");
+    eprintln!(" [{{:type clojure.lang.ExceptionInfo");
+    eprintln!("   :message Usage: by sessions prune <session-id>");
+    eprintln!("   :data {{}}");
+    eprintln!(
+        "   :at [ai.brainyard.agent_tui_app.main$cmd_sessions_prune invokeStatic main.clj 605]}}]"
+    );
+    eprintln!(" :trace");
+    eprintln!(" [[ai.brainyard.agent_tui_app.main$cmd_sessions_prune invokeStatic main.clj 605]");
+    eprintln!("  [ai.brainyard.agent_tui_app.main$cmd_sessions_prune invoke main.clj 596]");
+    eprintln!("  [cli_matic.core$invoke_subcmd invokeStatic core.cljc 546]");
+    eprintln!("  [cli_matic.core$invoke_subcmd invoke core.cljc 525]");
+    eprintln!("  [cli_matic.core$run_cmd_STAR_ invokeStatic core.cljc 589]");
+    eprintln!("  [cli_matic.core$run_cmd_STAR_ invoke core.cljc 560]");
+    eprintln!("  [cli_matic.core$run_cmd invokeStatic core.cljc 601]");
+    eprintln!("  [cli_matic.core$run_cmd invoke core.cljc 591]");
+    eprintln!("  [ai.brainyard.agent_tui_app.main$_dispatch invokeStatic main.clj 765]");
+    eprintln!("  [ai.brainyard.agent_tui_app.main$_dispatch invoke main.clj 731]");
+    eprintln!("  [ai.brainyard.agent_tui_app.main$_main invokeStatic main.clj 729]");
+    eprintln!("  [ai.brainyard.agent_tui_app.main$_main doInvoke main.clj 723]");
+    eprintln!("  [clojure.lang.RestFn applyTo RestFn.java 140]");
+    eprintln!("  [clojure.lang.Var applyTo Var.java 707]");
+    eprintln!("  [clojure.core$apply invokeStatic core.clj 667]");
+    eprintln!("  [clojure.main$main_opt invokeStatic main.clj 515]");
+    eprintln!("  [clojure.main$main_opt invoke main.clj 511]");
+    eprintln!("  [clojure.main$main invokeStatic main.clj 665]");
+    eprintln!("  [clojure.main$main doInvoke main.clj 617]");
+    eprintln!("  [clojure.lang.RestFn applyTo RestFn.java 140]");
+    eprintln!("  [clojure.lang.Var applyTo Var.java 707]");
+    eprintln!("  [clojure.main main main.java 40]]}}");
+    eprintln!();
+    eprintln!();
+    eprintln!();
+    std::process::exit(255);
 }
 
 fn exit_compat_short_h_error_if_requested(args: &[String]) {

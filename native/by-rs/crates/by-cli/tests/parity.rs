@@ -42,6 +42,25 @@ fn help_surfaces_match_oracle() {
 }
 
 #[test]
+fn invalid_cli_shapes_match_oracle() {
+    let Some(oracle) = oracle_binary() else {
+        return;
+    };
+    let _guard = parity_command_lock();
+
+    for args in [
+        &["--bogus"][..],
+        &["run", "--bogus"],
+        &["ask", "--bogus", "hello"],
+        &["models", "--bogus"],
+        &["sessions", "bogus"],
+        &["sessions", "prune"],
+    ] {
+        assert_command_matches_oracle(&oracle, args, "");
+    }
+}
+
+#[test]
 fn models_positional_provider_matches_oracle() {
     let Some(oracle) = oracle_binary() else {
         return;
