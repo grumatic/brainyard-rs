@@ -903,7 +903,7 @@ fn assert_command_matches_oracle(oracle: &Path, args: &[&str], stdin: &str) {
     let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
     let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
 
-    let expected = run_command(oracle, args, stdin, oracle_home.path());
+    let expected = run_oracle_command(oracle, args, stdin, oracle_home.path());
     let by_rs = by_rs_binary();
     let actual = run_command(&by_rs, args, stdin, rust_home.path());
 
@@ -932,7 +932,7 @@ fn assert_run_setup_error_matches_oracle(oracle: &Path, provider: &str) {
     let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
     let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
 
-    let expected = run_command(oracle, args, "/quit\n", oracle_home.path());
+    let expected = run_oracle_command(oracle, args, "/quit\n", oracle_home.path());
     let by_rs = by_rs_binary();
     let actual = run_command(&by_rs, args, "/quit\n", rust_home.path());
 
@@ -965,7 +965,7 @@ fn assert_ask_default_setup_error_matches_oracle(oracle: &Path) {
     let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
     let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
 
-    let expected = run_command(oracle, args, "", oracle_home.path());
+    let expected = run_oracle_command(oracle, args, "", oracle_home.path());
     let by_rs = by_rs_binary();
     let actual = run_command(&by_rs, args, "", rust_home.path());
 
@@ -1009,6 +1009,56 @@ fn oracle_binary() -> Option<PathBuf> {
     }
 }
 
+#[test]
+fn oracle_command_exports_isolated_user_home() {
+    let script_dir = tempfile::tempdir().expect("oracle script tempdir");
+    let script = script_dir.path().join("oracle-env.sh");
+    std::fs::write(
+        &script,
+        "#!/usr/bin/env bash\nprintf 'home=%s\\noracle=%s\\n' \"$HOME\" \"${BY_RS_ORACLE_USER_HOME:-}\"\n",
+    )
+    .expect("write oracle env script");
+
+    let mut perms = std::fs::metadata(&script)
+        .expect("oracle env script metadata")
+        .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).expect("chmod oracle env script");
+    }
+
+    let home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let result = run_oracle_command(&script, std::iter::empty::<&str>(), "", home.path());
+
+    assert_eq!(result.status_code, Some(0), "{result:?}");
+    assert_eq!(
+        result.stdout,
+        format!(
+            "home={}\noracle={}\n",
+            home.path().display(),
+            home.path().display()
+        )
+    );
+}
+
+#[test]
+fn normalize_output_removes_oracle_launcher_noise() {
+    let oracle_home = tempfile::tempdir().expect("oracle HOME tempdir");
+    let rust_home = tempfile::tempdir().expect("by-rs HOME tempdir");
+    let noisy = concat!(
+        "Picked up JAVA_TOOL_OPTIONS: -Duser.home=/tmp/by-oracle\n",
+        "Downloading: org/clojure/clojure/1.12.0/clojure-1.12.0.pom from central\n",
+        "Brainyard content\n",
+    );
+
+    assert_eq!(
+        normalize_output(noisy, oracle_home.path(), rust_home.path()),
+        "Brainyard content\n"
+    );
+}
+
 fn by_rs_binary() -> PathBuf {
     assert_cmd::cargo::cargo_bin("by-rs")
 }
@@ -1021,6 +1071,14 @@ where
     run_command_with_optional_oracle_user_home(binary, args, stdin, home, None)
 }
 
+fn run_oracle_command<I, S>(binary: &Path, args: I, stdin: &str, home: &Path) -> CommandResult
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    run_command_with_optional_oracle_user_home(binary, args, stdin, home, Some(home))
+}
+
 fn run_command_with_oracle_user_home<I, S>(
     binary: &Path,
     args: I,
@@ -1031,7 +1089,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    run_command_with_optional_oracle_user_home(binary, args, stdin, home, Some(home))
+    run_oracle_command(binary, args, stdin, home)
 }
 
 fn run_command_with_optional_oracle_user_home<I, S>(
@@ -1112,6 +1170,7 @@ where
 
 fn normalize_output(output: &str, oracle_home: &Path, rust_home: &Path) -> String {
     let mut normalized = output.replace("\r\n", "\n");
+    normalized = remove_oracle_launcher_noise(&normalized);
     for home in [oracle_home, rust_home] {
         if let Ok(canonical_home) = home.canonicalize() {
             normalized = normalized.replace(&canonical_home.display().to_string(), "$HOME");
@@ -1121,6 +1180,24 @@ fn normalize_output(output: &str, oracle_home: &Path, rust_home: &Path) -> Strin
     normalized = normalize_version_lines(&normalized);
     normalized = normalize_agent_instance_ids(&normalized);
     normalized = normalize_init_snapshot_timestamps(&normalized);
+    normalized
+}
+
+fn remove_oracle_launcher_noise(output: &str) -> String {
+    let had_trailing_newline = output.ends_with('\n');
+    let mut normalized = output
+        .lines()
+        .filter(|line| {
+            !(line.starts_with("Picked up JAVA_TOOL_OPTIONS:")
+                || line.starts_with("Downloading: ") && line.contains(" from "))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if had_trailing_newline && !normalized.is_empty() {
+        normalized.push('\n');
+    }
+
     normalized
 }
 
