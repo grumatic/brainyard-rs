@@ -584,6 +584,87 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"C
 }
 
 #[test]
+fn run_claude_code_live_resume_spools_large_system_prompt_file() {
+    let home = tempfile::tempdir().unwrap();
+    let path_dir = tempfile::tempdir().unwrap();
+    let session_id = "agt-run-claude-code-spooled";
+    let capture_stdin = home.path().join("claude-spooled-stdin.txt");
+    let capture_system = home.path().join("claude-spooled-system.txt");
+    let system_prompt = "S".repeat(262_145);
+
+    write_fake_executable(
+        &path_dir.path().join("claude"),
+        r#"#!/usr/bin/env bash
+system_file=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--system-prompt-file" ]; then
+    system_file="$arg"
+  fi
+  prev="$arg"
+done
+if [ -z "$system_file" ] || [ ! -f "$system_file" ]; then
+  echo "missing system prompt file: $system_file" >&2
+  exit 9
+fi
+cat "$system_file" > "$CLAUDE_SYSTEM_CAPTURE"
+cat > "$CLAUDE_CAPTURE_STDIN"
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Spooled system answer","usage":{"input_tokens":7,"output_tokens":8}}'
+"#,
+    );
+
+    write_session_meta(
+        home.path(),
+        session_id,
+        r#"{:agent-id :coact-agent
+            :defagent-id :coact-agent
+            :started-at 1000
+            :last-attached-at 1000}"#,
+    );
+    let session_dir = home.path().join(".brainyard/sessions").join(session_id);
+    let original_messages = format!(
+        r#"{{:t 1 :kind :message :payload {{:role "system" :content "{}"}}}}
+"#,
+        system_prompt
+    );
+    std::fs::write(session_dir.join("messages.log"), original_messages).unwrap();
+
+    Command::cargo_bin("by-rs")
+        .unwrap()
+        .env("HOME", home.path())
+        .env("BY_NO_DOTENV", "1")
+        .env("PATH", prepend_path(path_dir.path()))
+        .env("CLAUDE_CAPTURE_STDIN", &capture_stdin)
+        .env("CLAUDE_SYSTEM_CAPTURE", &capture_system)
+        .args([
+            "run",
+            "--inline",
+            "--resume",
+            session_id,
+            "-p",
+            "claude-code",
+            "-m",
+            "haiku",
+        ])
+        .write_stdin("Hello with system\n/quit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Spooled system answer"))
+        .stderr(predicate::str::is_empty());
+
+    assert_eq!(
+        std::fs::read_to_string(capture_stdin).unwrap(),
+        "Hello with system"
+    );
+    assert_eq!(
+        std::fs::read_to_string(capture_system).unwrap(),
+        system_prompt
+    );
+    let messages = read_session_messages(home.path(), session_id);
+    assert!(messages.contains(r#":content "Spooled system answer""#));
+}
+
+#[test]
 fn root_level_run_flags_are_routed_to_run_command() {
     let home = tempfile::tempdir().unwrap();
 

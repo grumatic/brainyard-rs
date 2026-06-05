@@ -12,12 +12,16 @@ use aws_sdk_bedrockruntime::{
 };
 use aws_types::region::Region;
 use serde_json::{json, Map, Value};
+use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_BEDROCK_REGION: &str = "us-east-1";
 const MAX_SYSTEM_CACHE_POINTS: usize = 3;
 const CLAUDE_CODE_SYSTEM_PROMPT_SPOOL_THRESHOLD_BYTES: usize = 262_144;
+const CLAUDE_CODE_SYSTEM_PROMPT_PLACEHOLDER: &str = "<spooled-system-prompt>";
 const ACP_DEFAULT_TIMEOUT_MS: u64 = 600_000;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -313,7 +317,7 @@ pub fn invoke_claude_code(
     messages: &[ChatMessage],
 ) -> Result<ClaudeCodeResponse> {
     let request = build_claude_code_request(config, messages);
-    let argv = request
+    let mut argv = request
         .get("argv")
         .and_then(Value::as_array)
         .context("claude-code request missing argv")?
@@ -324,6 +328,8 @@ pub fn invoke_claude_code(
                 .context("claude-code argv items must be strings")
         })
         .collect::<Result<Vec<_>>>()?;
+    let _spooled_system_prompt =
+        spool_claude_code_system_prompt_if_needed(&request, &mut argv, messages)?;
     let (program, args) = argv
         .split_first()
         .context("claude-code request argv must not be empty")?;
@@ -379,6 +385,87 @@ pub fn invoke_claude_code(
         text,
         stop_reason,
     })
+}
+
+struct TempFileGuard {
+    path: PathBuf,
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn spool_claude_code_system_prompt_if_needed(
+    request: &Value,
+    argv: &mut [String],
+    messages: &[ChatMessage],
+) -> Result<Option<TempFileGuard>> {
+    let spooled = request
+        .get("system_prompt_spooled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !spooled {
+        return Ok(None);
+    }
+
+    let (system_prompt, _) = flatten_claude_code_messages(messages);
+    let system_prompt = system_prompt
+        .context("claude-code request marked system prompt as spooled without system prompt")?;
+    let guard = write_spooled_claude_code_system_prompt(&system_prompt)?;
+    let path = guard.path.to_string_lossy().to_string();
+
+    let mut replaced = false;
+    for arg in argv.iter_mut() {
+        if arg == CLAUDE_CODE_SYSTEM_PROMPT_PLACEHOLDER {
+            *arg = path.clone();
+            replaced = true;
+        }
+    }
+    if !replaced {
+        bail!("claude-code request marked system prompt as spooled without placeholder path");
+    }
+
+    Ok(Some(guard))
+}
+
+fn write_spooled_claude_code_system_prompt(system_prompt: &str) -> Result<TempFileGuard> {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    for attempt in 0..32 {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "by-rs-claude-code-system-{}-{nonce}-{attempt}.txt",
+            std::process::id()
+        ));
+
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                file.write_all(system_prompt.as_bytes()).with_context(|| {
+                    format!(
+                        "failed to write Claude Code system prompt file {}",
+                        path.display()
+                    )
+                })?;
+                return Ok(TempFileGuard { path });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "failed to create Claude Code system prompt file {}",
+                        path.display()
+                    )
+                });
+            }
+        }
+    }
+
+    bail!("failed to allocate Claude Code system prompt temp file");
 }
 
 fn exit_status_display(status: ExitStatus) -> String {
