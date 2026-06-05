@@ -237,6 +237,7 @@ capture_case() {
     (
       cd "$native_root"
       HOME="$fixture_home" \
+      BY_NO_DOTENV=1 \
       PATH="$fixture_bin:$PATH" \
       TMUX= \
       CARGO_HOME="$cargo_home" \
@@ -249,6 +250,7 @@ capture_case() {
     (
       cd "$native_root"
       HOME="$fixture_home" \
+      BY_NO_DOTENV=1 \
       PATH="$fixture_bin:$PATH" \
       TMUX= \
       CARGO_HOME="$cargo_home" \

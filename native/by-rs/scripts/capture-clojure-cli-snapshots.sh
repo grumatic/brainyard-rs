@@ -239,6 +239,8 @@ capture_case() {
     (
       cd "$repo_root"
       HOME="$fixture_home" \
+      BY_NO_DOTENV=1 \
+      BY_RS_ORACLE_USER_HOME="$fixture_home" \
       PATH="$fixture_bin:$PATH" \
       TMUX= \
       BRAINYARD_PROJECT_DIR="$project_dir" \
@@ -249,6 +251,8 @@ capture_case() {
     (
       cd "$repo_root"
       HOME="$fixture_home" \
+      BY_NO_DOTENV=1 \
+      BY_RS_ORACLE_USER_HOME="$fixture_home" \
       PATH="$fixture_bin:$PATH" \
       TMUX= \
       BRAINYARD_PROJECT_DIR="$project_dir" \

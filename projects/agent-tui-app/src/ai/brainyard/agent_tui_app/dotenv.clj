@@ -57,25 +57,37 @@
       (into {} (keep parse-line (str/split-lines (slurp f))))
       (catch Exception _ {}))))
 
+(defn- truthy? [value]
+  (when value
+    (contains? #{"1" "true" "yes" "on"}
+               (str/lower-case (str/trim value)))))
+
+(defn- no-dotenv? []
+  (boolean
+   (or (truthy? (System/getenv "BY_NO_DOTENV"))
+       (truthy? (System/getProperty "BY_NO_DOTENV")))))
+
 (defn load-from-dotenv!
   "Scan `.env` candidate paths and merge into JVM System Properties. Real env
-   vars are never overridden. Returns {:paths [{:path :keys [str]}]
-   :loaded-count int}."
+  vars are never overridden. Returns {:paths [{:path :keys [str]}]
+  :loaded-count int}."
   []
-  (let [paths  (candidate-paths)
-        merged (atom {})
-        loaded (atom [])]
-    (doseq [^java.io.File f paths]
-      (when-let [m (parse-file f)]
-        (let [new-keys (remove (fn [[k _]]
-                                 (or (contains? @merged k)
-                                     (System/getenv k)))
-                               m)]
-          (when (seq new-keys)
-            (swap! merged into new-keys)
-            (swap! loaded conj {:path (.getAbsolutePath f)
-                                :keys (mapv first new-keys)})))))
-    (doseq [[k v] @merged]
-      (System/setProperty k v))
-    {:paths        @loaded
-     :loaded-count (count @merged)}))
+  (if (no-dotenv?)
+    {:paths [] :loaded-count 0}
+    (let [paths  (candidate-paths)
+          merged (atom {})
+          loaded (atom [])]
+      (doseq [^java.io.File f paths]
+        (when-let [m (parse-file f)]
+          (let [new-keys (remove (fn [[k _]]
+                                   (or (contains? @merged k)
+                                       (System/getenv k)))
+                                 m)]
+            (when (seq new-keys)
+              (swap! merged into new-keys)
+              (swap! loaded conj {:path (.getAbsolutePath f)
+                                  :keys (mapv first new-keys)})))))
+      (doseq [[k v] @merged]
+        (System/setProperty k v))
+      {:paths        @loaded
+       :loaded-count (count @merged)})))
