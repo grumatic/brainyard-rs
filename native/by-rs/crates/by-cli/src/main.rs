@@ -39543,7 +39543,7 @@ fn run_runtime_config_snapshot_json() -> serde_json::Value {
     let mut snapshot = agent_runtime_config_snapshot_json(&persisted);
 
     if let (Some(config), Some(dirs)) = (snapshot.as_object_mut(), process_dirs()) {
-        let user_dir = system_user_home_dir().or(dirs.user_dir);
+        let user_dir = dirs.user_dir.or_else(system_user_home_dir);
         config.insert(
             "dirs".to_string(),
             serde_json::json!({

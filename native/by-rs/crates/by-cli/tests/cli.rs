@@ -306,6 +306,46 @@ fn no_args_defaults_to_run_command() {
 }
 
 #[test]
+fn run_config_slash_command_reports_env_home_dir() {
+    let home = tempfile::tempdir().unwrap();
+    let project = tempfile::tempdir().unwrap();
+
+    let output = Command::cargo_bin("by-rs")
+        .unwrap()
+        .current_dir(project.path())
+        .env("HOME", home.path())
+        .env("BRAINYARD_PROJECT_DIR", project.path())
+        .env("BRAINYARD_SESSION_ID", "agt-run-config-home")
+        .env("BY_NO_DOTENV", "1")
+        .env("NO_COLOR", "1")
+        .env("TERM", "dumb")
+        .env("COLUMNS", "120")
+        .args(["run", "--inline"])
+        .write_stdin(
+            "/config
+/quit
+",
+        )
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let stdout = String::from_utf8(output).unwrap();
+    let home_path = home.path().to_path_buf();
+    let project = project.path().canonicalize().unwrap();
+    assert!(
+        stdout.contains(&format!(r#":user-dir "{}""#, home_path.display())),
+        "run /config should report HOME as :user-dir: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(r#":working-dir "{}""#, project.display())),
+        "run /config should report current directory as :working-dir: {stdout}"
+    );
+}
+
+#[test]
 fn run_loop_reads_until_quit_command() {
     let home = tempfile::tempdir().unwrap();
 

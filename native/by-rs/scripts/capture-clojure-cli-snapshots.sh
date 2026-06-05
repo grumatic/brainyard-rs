@@ -181,6 +181,9 @@ declare -a cases=(
   "sessions_prune_short_h|sessions prune -h"
   "sessions_prune_missing|sessions prune -s missing"
   "sessions_prune_missing_positional|sessions prune missing"
+  "run_inline_quit|run --inline"
+  "run_inline_help|run --inline"
+  "run_inline_config|run --inline"
 )
 
 json_escape() {
@@ -205,12 +208,33 @@ terminate_tree() {
   kill -"$signal" "$pid" 2>/dev/null || true
 }
 
+
+write_case_stdin() {
+  local name="$1"
+  local stdin_file="$2"
+  case "$name" in
+    run_inline_quit)
+      printf '/quit\n' >"$stdin_file"
+      ;;
+    run_inline_help)
+      printf '/help\n/quit\n' >"$stdin_file"
+      ;;
+    run_inline_config)
+      printf '/config\n/quit\n' >"$stdin_file"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 capture_case() {
   local name="$1"
   shift
   local stdout_file="$out_dir/$name.stdout.txt"
   local stderr_file="$out_dir/$name.stderr.txt"
   local status_file="$out_dir/$name.exitcode"
+  local session_id="agt-snapshot-${name//_/-}"
   local status=0
   local command=""
   local env_prefix=""
@@ -223,6 +247,8 @@ capture_case() {
     write_select_resume_fixture
     stdin_file="$fixture_home/$name.stdin"
     printf 'N\n' >"$stdin_file"
+  elif write_case_stdin "$name" "$fixture_home/$name.stdin"; then
+    stdin_file="$fixture_home/$name.stdin"
   fi
 
   local timeout_file="$fixture_home/$name.timeout"
@@ -244,6 +270,7 @@ capture_case() {
       PATH="$fixture_bin:$PATH" \
       TMUX= \
       BRAINYARD_PROJECT_DIR="$project_dir" \
+      BRAINYARD_SESSION_ID="$session_id" \
       NO_COLOR=1 \
         bash -lc "$env_prefix$command" <"$stdin_file"
     ) >"$stdout_file" 2>"$stderr_file" &
@@ -256,6 +283,7 @@ capture_case() {
       PATH="$fixture_bin:$PATH" \
       TMUX= \
       BRAINYARD_PROJECT_DIR="$project_dir" \
+      BRAINYARD_SESSION_ID="$session_id" \
       NO_COLOR=1 \
         "$bin_path" "$@" <"$stdin_file"
     ) >"$stdout_file" 2>"$stderr_file" &
